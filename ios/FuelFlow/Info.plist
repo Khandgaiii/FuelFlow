@@ -50,5 +50,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>FuelFlow needs Bluetooth access to connect to your vehicle's diagnostic device</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>FuelFlow needs Bluetooth access to communicate with your vehicle</string>
 </dict>
 </plist>

@@ -15,6 +15,7 @@ export interface Colors {
   cyan: string;
   teal: string;
   green: string;
+  error: string;   // <--- ADD THIS LINE
 }
 
 export interface ThemeContextType {
@@ -36,6 +37,7 @@ const lightColors: Colors = {
   cyan: '#00D9FF',
   teal: '#008B8B',
   green: '#10B981',
+  error: '#FF3B30', // <--- ADD THIS LINE
 };
 
 const darkColors: Colors = {
@@ -51,6 +53,7 @@ const darkColors: Colors = {
   cyan: '#00D9FF',
   teal: '#008B8B',
   green: '#10B981',
+  error: '#FF3B30', // <--- ADD THIS LINE
 };
 
 export const ThemeContext = createContext<ThemeContextType | undefined>(undefined);

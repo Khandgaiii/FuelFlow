@@ -1,60 +1,177 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
+import firestore from '@react-native-firebase/firestore';
 import { Icon } from '../components/Icon';
 import { DashboardTabScreenProps } from '../types/navigation';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalization } from '../context/LocalizationContext';
 import { useMetricUnits } from '../context/MetricUnitsContext';
-import { RadialGauge } from '../components/RadialGauge';
+import { useAuth } from '../context/AuthContext';
+import { RadialGauge } from '../components/RadialGauge'; // ← swap to new RadialGauge.tsx
 import { VehicleStatus } from '../components/VehicleStatus';
 import { AppHeader } from '../navigation/RootNavigator';
-import { dashboardData, MAX_SPEED, MAX_RPM, MAX_FUEL_CONSUMPTION, MAX_THROTTLE } from '../constants/mockData';
+import { MAX_RPM, MAX_THROTTLE } from '../constants/mockData';
+
+const EMPTY_TELEMETRY = {
+  speed: 0,
+  rpm: 0,
+  fuelConsumption: 0,
+  throttlePosition: 0,
+  battery: 0,
+  coolant: 0,
+  oilPressure: 0,
+  engineLoad: 0,
+  lastUpdated: null as any,
+};
+
+const ORANGE = '#F97316';
+const TEAL = '#14B8A6';
 
 const DashboardScreen: React.FC<DashboardTabScreenProps> = ({ navigation }) => {
   const { colors } = useTheme();
   const { t } = useLocalization();
   const { metricUnits } = useMetricUnits();
+  const { user } = useAuth();
 
-  // Convert speed from KM/H to MPH if metric units are off
-  const displaySpeed = metricUnits 
-    ? dashboardData.speed 
-    : Math.round(dashboardData.speed * 0.621371);
+  const [data, setData] = useState(EMPTY_TELEMETRY);
+  const [isFetching, setIsFetching] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [lastSynced, setLastSynced] = useState<string | null>(null);
+
+  // Pulse animation for live dot
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Spin animation for refresh icon
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isConnected) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 0.3, duration: 900, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isConnected]);
+
+  const spinRefresh = () => {
+    spinAnim.setValue(0);
+    Animated.timing(spinAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
+  };
+
+  const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  // --- Firebase: ensure doc exists, then fetch ---
+  const ensureAndFetchTelemetry = async () => {
+    if (!user?.uid) return;
+    setIsFetching(true);
+    spinRefresh();
+    try {
+      const docRef = firestore()
+        .collection('users')
+        .doc(user.uid)
+        .collection('telemetry')
+        .doc('latest');
+
+      const docSnap = await docRef.get();
+
+      if (docSnap.exists()) {
+        const fetched = docSnap.data() as typeof EMPTY_TELEMETRY;
+        setData(fetched);
+        setIsConnected(fetched.speed > 0 || fetched.rpm > 0 || fetched.battery > 0);
+      } else {
+        console.log(`[FuelFlow] No doc for UID ${user.uid} — creating with zeros...`);
+        await docRef.set({
+          ...EMPTY_TELEMETRY,
+          lastUpdated: firestore.FieldValue.serverTimestamp(),
+        });
+        setData(EMPTY_TELEMETRY);
+        setIsConnected(false);
+      }
+      // Record sync time
+      const now = new Date();
+      setLastSynced(
+        now.toLocaleTimeString('mn-MN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    } catch (error) {
+      console.error('[FuelFlow] Fetch error:', error);
+    } finally {
+      setIsFetching(false);
+      setIsInitialLoad(false);
+    }
+  };
+
+  useEffect(() => {
+    ensureAndFetchTelemetry();
+  }, [user]);
+
+  // --- Simulator ---
+  const simulateNewData = async () => {
+    if (!user?.uid) return;
+    const sim = {
+      speed: Math.floor(Math.random() * 120) + 20,
+      rpm: Math.floor(Math.random() * 4000) + 1000,
+      fuelConsumption: parseFloat((Math.random() * 5 + 6).toFixed(1)),
+      throttlePosition: Math.floor(Math.random() * 60) + 10,
+      battery: parseFloat((Math.random() * 1.5 + 11.5).toFixed(1)),
+      coolant: Math.floor(Math.random() * 30) + 80,
+      oilPressure: Math.floor(Math.random() * 20) + 20,
+      engineLoad: Math.floor(Math.random() * 50) + 30,
+      lastUpdated: firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      await firestore()
+        .collection('users')
+        .doc(user.uid)
+        .collection('telemetry')
+        .doc('latest')
+        .set(sim);
+      await ensureAndFetchTelemetry();
+    } catch (err) {
+      console.error('[FuelFlow] Sim error:', err);
+    }
+  };
+
+  // --- Unit conversions ---
+  const displaySpeed = metricUnits ? data.speed : Math.round(data.speed * 0.621371);
   const speedUnit = metricUnits ? 'km/h' : 'mph';
   const maxSpeed = metricUnits ? 240 : 150;
-  
-  // Fuel consumption conversion
   const fuelUnit = metricUnits ? 'L/100km' : 'mpg';
-  const displayFuel = metricUnits ? dashboardData.fuelConsumption : Math.round(235.215 / dashboardData.fuelConsumption);
+  const displayFuel = metricUnits
+    ? data.fuelConsumption
+    : data.fuelConsumption > 0
+    ? Math.round(235.215 / data.fuelConsumption)
+    : 0;
   const maxFuel = metricUnits ? 25 : 60;
 
-  // Get status color based on metric
-  const getBatteryColor = (value: number) => {
-    if (value >= 12.4) return colors.success;
-    if (value >= 12.0) return colors.warning;
-    return colors.danger;
-  };
+  const noData = !isConnected;
 
-  const getCoolantColor = (value: number) => {
-    if (value <= 95) return colors.success;
-    if (value <= 105) return colors.warning;
-    return colors.danger;
-  };
+  const batteryStatus = (v: number) => (v === 0 ? 'good' : v >= 12.4 ? 'good' : v >= 12.0 ? 'warning' : 'critical');
+  const coolantStatus = (v: number) => (v === 0 ? 'good' : v <= 95 ? 'good' : v <= 105 ? 'warning' : 'critical');
+  const oilStatus = (v: number) => (v === 0 ? 'good' : v >= 25 ? 'good' : v >= 15 ? 'warning' : 'critical');
+  const engineStatus = (v: number) => (v === 0 ? 'good' : v <= 75 ? 'good' : v <= 90 ? 'warning' : 'critical');
 
-  const getOilColor = (value: number) => {
-    if (value >= 25) return colors.success;
-    return colors.danger;
-  };
-
-  const getEngineLoadColor = (value: number) => {
-    if (value <= 70) return colors.success;
-    if (value <= 85) return colors.warning;
-    return colors.danger;
-  };
+  if (isInitialLoad) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={ORANGE} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Телеметри ачааллаж байна...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -62,240 +179,250 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({ navigation }) => {
       <ScrollView
         style={[styles.container, { backgroundColor: colors.background }]}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 48 }}
       >
-      {/* Real-Time Performance - Main Gauges */}
-      <View style={[styles.mainCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-        <View style={styles.cardHeader}>
-          <View style={[styles.statusIndicator, { backgroundColor: colors.primary }]} />
-          <Text style={[styles.headerLabel, { color: colors.textSecondary }]}>
-            {t('realtime_performance')}
-          </Text>
-        </View>
 
-        <View style={styles.gaugesRow}>
-          <View style={styles.gaugeWrapper}>
-            <RadialGauge
-              value={displaySpeed}
-              maxValue={maxSpeed}
-              label={t('speed')}
-              unit={speedUnit}
-              ringColor={colors.cyan}
-              size="sm"
-            />
+        {/* ── No Signal Banner ── */}
+        {noData && (
+          <View style={styles.noSignalBanner}>
+            <Icon name="wifi-off" size={13} color="#F59E0B" />
+            <Text style={styles.noSignalText}>
+              Машин холбогдоогүй — Симуляц ашиглаж туршина уу
+            </Text>
           </View>
-          <View style={styles.gaugeWrapper}>
-            <RadialGauge
-              value={dashboardData.rpm}
-              maxValue={MAX_RPM}
-              label={t('rpm')}
-              unit="x1000"
-              ringColor={colors.green}
-              size="sm"
-            />
+        )}
+
+        {/* ── Section Header: Live ── */}
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionTitleRow}>
+            <Animated.View style={[styles.liveDot, { opacity: isConnected ? pulseAnim : 0.2 }]} />
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              {isConnected ? 'LIVE' : 'NO SIGNAL'}
+            </Text>
+            {lastSynced && (
+              <Text style={[styles.syncTime, { color: colors.textSecondary }]}>
+                · {lastSynced}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.actionBtns}>
+            {/* Simulate button */}
+            <TouchableOpacity
+              style={[styles.iconBtn, { borderColor: 'rgba(249,115,22,0.3)', backgroundColor: 'rgba(249,115,22,0.08)' }]}
+              onPress={simulateNewData}
+              disabled={isFetching}
+            >
+              <Icon name="upload-cloud" size={16} color={ORANGE} />
+            </TouchableOpacity>
+
+            {/* Refresh button */}
+            <TouchableOpacity
+              style={[styles.iconBtn, { borderColor: colors.border }]}
+              onPress={ensureAndFetchTelemetry}
+              disabled={isFetching}
+            >
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <Icon
+                  name="refresh-cw"
+                  size={16}
+                  color={isFetching ? colors.primary : colors.textSecondary}
+                />
+              </Animated.View>
+            </TouchableOpacity>
           </View>
         </View>
-      </View>
 
-      {/* Secondary Metrics */}
-      <View style={styles.spacer} />
+        {/* ── Gauges Card ── */}
+        <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+          <View style={styles.gaugesRow}>
+            <View style={styles.gaugeWrapper}>
+              <RadialGauge
+                value={displaySpeed}
+                maxValue={maxSpeed}
+                label={t('speed')}
+                unit={speedUnit}
+                ringColor={colors.cyan ?? '#06B6D4'}
+                size="sm"
+              />
+            </View>
+            <View style={[styles.gaugeDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.gaugeWrapper}>
+              <RadialGauge
+                value={data.rpm}
+                maxValue={MAX_RPM}
+                label={t('rpm')}
+                unit="x1000"
+                ringColor={colors.green ?? '#22C55E'}
+                size="sm"
+              />
+            </View>
+          </View>
+        </View>
 
-      {/* Fuel Consumption Bar */}
-      <View style={[styles.metricCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-        <View style={styles.metricHeader}>
-          <Text style={[styles.metricLabel, { color: colors.text }]}>
-            {t('fuel_consumption')}
-          </Text>
-          <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
-            {fuelUnit}
-          </Text>
+        {/* ── Fuel + Throttle ── */}
+        <View style={styles.metricsRow}>
+          <View style={[styles.metricCardHalf, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>{t('fuel_consumption')}</Text>
+            <Text style={[styles.metricBigValue, { color: noData ? 'rgba(255,255,255,0.15)' : colors.text }]}>
+              {noData ? '—' : displayFuel}
+            </Text>
+            <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>{fuelUnit}</Text>
+            <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: TEAL,
+                    width: noData ? '0%' : `${Math.min((Number(displayFuel) / maxFuel) * 100, 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          <View style={[styles.metricCardHalf, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>{t('throttle_position')}</Text>
+            <Text style={[styles.metricBigValue, { color: noData ? 'rgba(255,255,255,0.15)' : colors.text }]}>
+              {noData ? '—' : data.throttlePosition}
+            </Text>
+            <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>%</Text>
+            <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+              <View
+                style={[
+                  styles.barFill,
+                  {
+                    backgroundColor: ORANGE,
+                    width: noData ? '0%' : `${Math.min((data.throttlePosition / MAX_THROTTLE) * 100, 100)}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
         </View>
-        <View style={styles.metricValue}>
-          <Text style={[styles.largeValue, { color: colors.text }]}>
-            {displayFuel}
-          </Text>
+
+        {/* ── System Status ── */}
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>SYSTEM STATUS</Text>
         </View>
-        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
-          <View
-            style={[
-              styles.progressBarFill,
+
+        <View style={[styles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border, padding: 0, overflow: 'hidden' }]}>
+          <VehicleStatus
+            items={[
               {
-                backgroundColor: colors.teal,
-                width: `${(displayFuel / maxFuel) * 100}%`,
+                icon: <Icon name="zap" size={20} color={noData ? colors.textSecondary : colors.success} />,
+                label: t('battery'),
+                value: noData ? '— V' : `${Number(data.battery).toFixed(1)}V`,
+                status: batteryStatus(data.battery),
+                color: colors.success,
+              },
+              {
+                icon: <Icon name="thermometer" size={20} color={noData ? colors.textSecondary : colors.success} />,
+                label: t('coolant'),
+                value: noData ? '— °C' : `${data.coolant}°C`,
+                status: coolantStatus(data.coolant),
+                color: colors.success,
+              },
+              {
+                icon: <Icon name="droplets" size={20} color={noData ? colors.textSecondary : colors.success} />,
+                label: t('oil_pressure'),
+                value: noData ? '— PSI' : `${data.oilPressure} PSI`,
+                status: oilStatus(data.oilPressure),
+                color: colors.success,
+              },
+              {
+                icon: <Icon name="power" size={20} color={noData ? colors.textSecondary : colors.success} />,
+                label: t('engine_load'),
+                value: noData ? '— %' : `${data.engineLoad}%`,
+                status: engineStatus(data.engineLoad),
+                color: colors.success,
               },
             ]}
+            colors={colors}
           />
         </View>
-      </View>
 
-      {/* Throttle Position Bar */}
-      <View style={[styles.metricCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
-        <View style={styles.metricHeader}>
-          <Text style={[styles.metricLabel, { color: colors.text }]}>
-            {t('throttle_position')}
-          </Text>
-          <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
-            %
-          </Text>
-        </View>
-        <View style={styles.metricValue}>
-          <Text style={[styles.largeValue, { color: colors.text }]}>
-            {dashboardData.throttlePosition}
-          </Text>
-        </View>
-        <View style={[styles.progressBarContainer, { backgroundColor: colors.border }]}>
-          <View
-            style={[
-              styles.progressBarFill,
-              {
-                backgroundColor: colors.teal,
-                width: `${(dashboardData.throttlePosition / MAX_THROTTLE) * 100}%`,
-              },
-            ]}
-          />
-        </View>
-      </View>
-
-      {/* Quick Stats Grid */}
-      <View style={styles.spacer} />
-
-      <View style={styles.statsSection}>
-        <Text style={[styles.statsSectionTitle, { color: colors.textSecondary }]}>
-          System Status
-        </Text>
-        <VehicleStatus
-          items={[
-            {
-              icon: <Icon name="zap" size={24} color={colors.success} />,
-              label: t('battery'),
-              value: `${dashboardData.battery.toFixed(1)}V`,
-              status: dashboardData.battery >= 12.4 ? 'good' : dashboardData.battery >= 12.0 ? 'warning' : 'critical',
-              color: colors.success,
-            },
-            {
-              icon: <Icon name="thermometer" size={24} color={colors.success} />,
-              label: t('coolant'),
-              value: `${dashboardData.coolant}°C`,
-              status: dashboardData.coolant <= 95 ? 'good' : dashboardData.coolant <= 105 ? 'warning' : 'critical',
-              color: colors.success,
-            },
-            {
-              icon: <Icon name="droplets" size={24} color={colors.success} />,
-              label: t('oil_pressure'),
-              value: `${dashboardData.oilPressure} PSI`,
-              status: dashboardData.oilPressure >= 25 ? 'good' : dashboardData.oilPressure >= 15 ? 'warning' : 'critical',
-              color: colors.success,
-            },
-            {
-              icon: <Icon name="power" size={24} color={colors.success} />,
-              label: t('engine_load'),
-              value: `${dashboardData.engineLoad}%`,
-              status: dashboardData.engineLoad <= 75 ? 'good' : dashboardData.engineLoad <= 90 ? 'warning' : 'critical',
-              color: colors.success,
-            },
-          ]}
-          colors={colors}
-        />
-      </View>
-
-      {/* Bottom Padding */}
-      <View style={{ height: 40 }} />
-    </ScrollView>
+      </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingTop: 16,
-  },
-  mainCard: {
+  container: { flex: 1 },
+
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  loadingText: { fontSize: 13, fontWeight: '500' },
+
+  noSignalBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginHorizontal: 16,
-    marginBottom: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    marginTop: 12,
+    marginBottom: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.2)',
+  },
+  noSignalText: { color: '#F59E0B', fontSize: 12, fontWeight: '500', flex: 1 },
+
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
+  sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  syncTime: { fontSize: 11, opacity: 0.5 },
+
+  actionBtns: { flexDirection: 'row', gap: 8 },
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  card: {
+    marginHorizontal: 16,
     borderRadius: 16,
     borderWidth: 1,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  statusIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 10,
-  },
-  headerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  gaugesRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    gap: 12,
-  },
-  gaugeWrapper: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  spacer: {
-    height: 8,
-  },
-  metricCard: {
-    marginHorizontal: 16,
-    marginBottom: 12,
     padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
+    marginBottom: 4,
   },
-  metricHeader: {
+
+  gaugesRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around' },
+  gaugeWrapper: { flex: 1, alignItems: 'center' },
+  gaugeDivider: { width: 1, height: 70, opacity: 0.3 },
+
+  metricsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    marginHorizontal: 16,
+    gap: 10,
+    marginTop: 10,
+    marginBottom: 4,
   },
-  metricLabel: {
-    fontSize: 13,
-    fontWeight: '600',
+  metricCardHalf: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 2,
   },
-  metricUnit: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  metricValue: {
-    marginBottom: 12,
-  },
-  largeValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    fontFamily: 'Courier New',
-  },
-  progressBarContainer: {
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  statsSection: {
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  statsSectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
+  metricLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginBottom: 4 },
+  metricBigValue: { fontSize: 30, fontWeight: '800', fontFamily: 'Courier New', letterSpacing: -1 },
+  metricUnit: { fontSize: 10, fontWeight: '500', marginBottom: 10, opacity: 0.5 },
+  barTrack: { height: 4, borderRadius: 2, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 2 },
 });
 
 export default DashboardScreen;

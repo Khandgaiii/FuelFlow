@@ -15,12 +15,15 @@ import { useLocalization, Language } from '../context/LocalizationContext';
 import { useMetricUnits } from '../context/MetricUnitsContext';
 import { AppHeader } from '../navigation/RootNavigator';
 import { Card } from '../components/UIComponents';
+import { useAuth } from '../context/AuthContext';
 
 const SettingsScreen: React.FC<SettingsTabScreenProps> = ({ navigation }) => {
   const { colors } = useTheme();
   const { t, language, setLanguage } = useLocalization();
   const { metricUnits, setMetricUnits } = useMetricUnits();
-
+  
+  // 2. Access the Firebase user and logout function
+  const { user, logout } = useAuth();
   const [faultAlerts, setFaultAlerts] = useState(true);
   const [maintenanceReminders, setMaintenanceReminders] = useState(true);
   const [languageModalVisible, setLanguageModalVisible] = useState(false);
@@ -39,6 +42,29 @@ const SettingsScreen: React.FC<SettingsTabScreenProps> = ({ navigation }) => {
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <AppHeader vehicleName="FuelFlow" />
+      {/* Account Section */}
+<Text style={[styles.sectionHeader, { color: colors.text, marginTop: 16 }]}>
+  {t('account') || 'Account'}
+</Text>
+
+<Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
+  <View style={styles.settingRow}>
+    <View style={styles.settingInfo}>
+      <Text style={[styles.settingLabel, { color: colors.text }]}>
+        {user?.displayName || 'User'}
+      </Text>
+      <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
+        {user?.email}
+      </Text>
+    </View>
+    <TouchableOpacity 
+      onPress={logout}
+      style={[styles.logoutButton, { backgroundColor: colors.error || '#FF4444' }]}
+    >
+      <Text style={styles.logoutText}>{t('logout') || 'Logout'}</Text>
+    </TouchableOpacity>
+  </View>
+</Card>
       <ScrollView
         style={[styles.container, { backgroundColor: colors.background }]}
         showsVerticalScrollIndicator={false}
@@ -382,6 +408,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  logoutButton: {
+  paddingHorizontal: 16,
+  paddingVertical: 8,
+  borderRadius: 8,
+},
+logoutText: {
+  color: '#FFFFFF',
+  fontWeight: '600',
+  fontSize: 14,
+},
 });
 
 export default SettingsScreen;

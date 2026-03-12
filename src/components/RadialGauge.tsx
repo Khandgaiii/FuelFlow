@@ -1,15 +1,34 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
-import Svg, { Circle, G, Line } from 'react-native-svg';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 
 interface RadialGaugeProps {
   value: number;
   maxValue: number;
   label: string;
   unit: string;
+  ringColor: string;
   size?: 'sm' | 'md' | 'lg';
-  color?: 'cyan' | 'lime';
-  ringColor?: string;
+}
+
+// Build an SVG arc path from polar coordinates
+function describeArc(
+  cx: number,
+  cy: number,
+  r: number,
+  startAngle: number,
+  endAngle: number
+): string {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+  const x1 = cx + r * Math.cos(toRad(startAngle));
+  const y1 = cy + r * Math.sin(toRad(startAngle));
+  const x2 = cx + r * Math.cos(toRad(endAngle));
+  const y2 = cy + r * Math.sin(toRad(endAngle));
+
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+
+  return `M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}`;
 }
 
 export const RadialGauge: React.FC<RadialGaugeProps> = ({
@@ -17,154 +36,130 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   maxValue,
   label,
   unit,
-  size = 'lg',
-  color = 'cyan',
-  ringColor = '#00D4FF',
+  ringColor,
+  size = 'sm',
 }) => {
-  const [displayValue, setDisplayValue] = useState(0);
+  const dim = size === 'lg' ? 160 : size === 'md' ? 130 : 110;
+  const strokeWidth = 8;
+  const cx = dim / 2;
+  const cy = dim / 2;
+  const radius = (dim - strokeWidth * 2) / 2;
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDisplayValue(Math.round(value));
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [value]);
+  // Arc goes from 135° to 405° (270° sweep) — bottom-left to bottom-right
+  const START_ANGLE = 135;
+  const END_ANGLE = 405;
+  const SWEEP = END_ANGLE - START_ANGLE; // 270
 
-  const sizeConfig = {
-    sm: { width: 112, height: 112, radius: 50, fontSize: 24 },
-    md: { width: 144, height: 144, radius: 65, fontSize: 28 },
-    lg: { width: 180, height: 180, radius: 80, fontSize: 36 },
-  };
+  const clampedValue = Math.min(Math.max(value, 0), maxValue);
+  const progress = clampedValue / maxValue;
+  const fillEndAngle = START_ANGLE + SWEEP * progress;
 
-  const config = sizeConfig[size];
-  const percentage = (displayValue / maxValue) * 100;
-  const circumference = 2 * Math.PI * config.radius;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference * 0.75;
-  const strokeWidth = size === 'lg' ? 12 : size === 'md' ? 10 : 8;
+  const trackPath = describeArc(cx, cy, radius, START_ANGLE, END_ANGLE);
+  const fillPath =
+    progress > 0
+      ? describeArc(cx, cy, radius, START_ANGLE, Math.max(fillEndAngle, START_ANGLE + 0.5))
+      : null;
 
-  // Generate tick marks
-  const tickMarks = Array.from({ length: 9 }, (_, i) => {
-    const angle = -135 + i * 33.75;
-    return { angle, value: Math.round((i / 8) * maxValue) };
-  });
+  // Display value - for rpm divide by 1000
+  const displayValue =
+    unit === 'x1000' ? (value / 1000).toFixed(1) : String(value);
+  const displayUnit = unit === 'x1000' ? 'RPM' : unit;
+
+  const noData = value === 0;
+  const dimColor = 'rgba(255,255,255,0.07)';
+  const gradientId = `grad-${label.replace(/\s/g, '')}`;
 
   return (
-    <View style={styles.container}>
-      <View style={{ width: config.width, height: config.height, position: 'relative' }}>
-        <Svg width={config.width} height={config.height} viewBox={`0 0 ${config.width} ${config.height}`}>
-          {/* Background arc */}
-          <Circle
-            cx={config.width / 2}
-            cy={config.height / 2}
-            r={config.radius}
-            fill="none"
-            stroke="#FFFFFF"
-            strokeWidth={strokeWidth}
-            strokeOpacity={0.15}
-            strokeDasharray={`${circumference * 0.75} ${circumference * 0.25}`}
-            rotation={-135}
-            originX={config.width / 2}
-            originY={config.height / 2}
-          />
+    <View style={styles.wrapper}>
+      <Svg width={dim} height={dim}>
+        <Defs>
+          <LinearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+            <Stop offset="0%" stopColor={ringColor} stopOpacity="0.6" />
+            <Stop offset="100%" stopColor={ringColor} stopOpacity="1" />
+          </LinearGradient>
+        </Defs>
 
-          {/* Active arc */}
-          <Circle
-            cx={config.width / 2}
-            cy={config.height / 2}
-            r={config.radius}
-            fill="none"
-            stroke={ringColor}
+        {/* Track (background arc) */}
+        <Path
+          d={trackPath}
+          stroke={dimColor}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          fill="none"
+        />
+
+        {/* Fill arc */}
+        {fillPath && !noData && (
+          <Path
+            d={fillPath}
+            stroke={`url(#${gradientId})`}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
-            strokeDasharray={`${circumference * 0.75} ${circumference * 0.25}`}
-            strokeDashoffset={strokeDashoffset}
-            rotation={-135}
-            originX={config.width / 2}
-            originY={config.height / 2}
+            fill="none"
           />
+        )}
 
-          {/* Tick marks */}
-          {tickMarks.map((tick, i) => {
-            const angle = (tick.angle * Math.PI) / 180;
-            const x1 = config.width / 2;
-            const y1 = config.height / 2;
-            const x2 = config.width / 2 + (config.radius - 12) * Math.cos(angle);
-            const y2 = config.height / 2 + (config.radius - 12) * Math.sin(angle);
-            
-            // Calculate rotated tick mark endpoints
-            const centerX = config.width / 2;
-            const centerY = config.height / 2;
-            const baseX = centerX;
-            const baseY = centerY - config.radius + 8;
-            const tickLength = 4;
-            
-            // Rotate tick mark around center
-            const angleRad = (tick.angle + 135) * (Math.PI / 180);
-            const relativeX = baseX - centerX;
-            const relativeY = baseY - (centerY - config.radius + 8);
-            
-            const rotatedX1 = centerX + relativeX * Math.cos(angleRad) - relativeY * Math.sin(angleRad);
-            const rotatedY1 = centerY + relativeX * Math.sin(angleRad) + relativeY * Math.cos(angleRad);
-            
-            const endX = centerX + (relativeX - tickLength) * Math.cos(angleRad);
-            const endY = centerY + (relativeX - tickLength) * Math.sin(angleRad);
-            
-            return (
-              <Line
-                key={i}
-                x1={rotatedX1}
-                y1={rotatedY1}
-                x2={endX}
-                y2={endY}
-                stroke="rgba(255,255,255,0.3)"
-                strokeWidth="2"
-              />
-            );
-          })}
-        </Svg>
+        {/* Center dot */}
+        <Circle
+          cx={cx}
+          cy={cy}
+          r={3}
+          fill={noData ? dimColor : ringColor}
+          opacity={noData ? 1 : 0.6}
+        />
+      </Svg>
 
-        {/* Center display */}
-        <View style={styles.centerDisplay}>
-          <Text style={[styles.gaugeValue, { fontSize: config.fontSize, color: ringColor }]}>
-            {displayValue}
-          </Text>
-          <Text style={[styles.gaugeUnit, { color: ringColor }]}>{unit}</Text>
-          <Text style={styles.gaugeLabel}>{label}</Text>
-        </View>
+      {/* Center text overlay */}
+      <View style={[styles.centerText, { width: dim, height: dim }]}>
+        <Text
+          style={[
+            styles.valueText,
+            { color: noData ? 'rgba(255,255,255,0.2)' : '#FFFFFF' },
+            size === 'lg' && { fontSize: 28 },
+          ]}
+        >
+          {noData ? '—' : displayValue}
+        </Text>
+        <Text style={styles.unitText}>{displayUnit}</Text>
       </View>
+
+      {/* Label below */}
+      <Text style={styles.labelText}>{label.toUpperCase()}</Text>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  wrapper: {
     alignItems: 'center',
-    justifyContent: 'center',
+    position: 'relative',
   },
-  centerDisplay: {
+  centerText: {
     position: 'absolute',
-    width: '100%',
-    height: '100%',
+    top: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 1,
   },
-  gaugeValue: {
-    fontWeight: 'bold',
+  valueText: {
+    fontSize: 22,
+    fontWeight: '800',
     fontFamily: 'Courier New',
+    letterSpacing: -0.5,
+    color: '#FFFFFF',
   },
-  gaugeUnit: {
-    fontSize: 11,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 2,
-  },
-  gaugeLabel: {
+  unitText: {
     fontSize: 10,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    color: '#999',
-    marginTop: 2,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.35)',
+    letterSpacing: 0.8,
+  },
+  labelText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 1.2,
+    marginTop: 4,
   },
 });
