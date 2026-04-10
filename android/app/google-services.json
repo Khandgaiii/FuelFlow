@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "301509148498",
+    "project_id": "thesiswork-a",
+    "storage_bucket": "thesiswork-a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:301509148498:android:abd96c545ed961ea7f448b",
+        "android_client_info": {
+          "package_name": "com.fuelflow.moko"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "301509148498-87ii7n02dondr34dgn82e38ikg39a40j.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fuelflow.moko",
+            "certificate_hash": "089f31b8b8a1fe5c517d2c9a279a1254080df789"
+          }
+        },
+        {
+          "client_id": "301509148498-v1vrrgvmsdj6rn1u238o4nkjfrfeqf1i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fuelflow.moko",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "301509148498-885pdeqhul3ieat73urmcb9tssrevmll.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAwOOVkWfgADu8CnR8RkuDDzzwfwEDsI8k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "301509148498-885pdeqhul3ieat73urmcb9tssrevmll.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -4,420 +4,452 @@ import {
   StyleSheet,
   ScrollView,
   Text,
-  Switch,
   TouchableOpacity,
   Modal,
-  FlatList,
+  Pressable,
 } from 'react-native';
+import MCI from 'react-native-vector-icons/MaterialCommunityIcons';
 import { SettingsTabScreenProps } from '../types/navigation';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalization, Language } from '../context/LocalizationContext';
 import { useMetricUnits } from '../context/MetricUnitsContext';
 import { AppHeader } from '../navigation/RootNavigator';
-import { Card } from '../components/UIComponents';
 import { useAuth } from '../context/AuthContext';
+import { useTelemetry } from '../context/TelemetryContext';
+import { ActivityIndicator } from 'react-native';
 
-const SettingsScreen: React.FC<SettingsTabScreenProps> = ({ navigation }) => {
+const ORANGE = '#F97316';
+
+// ─── Toggle ──────────────────────────────────────────────────────────────────
+interface ToggleProps {
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+  activeColor?: string;
+}
+
+const Toggle: React.FC<ToggleProps> = ({
+  value,
+  onValueChange,
+  activeColor = ORANGE,
+}) => {
+  const { colors } = useTheme();
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() => onValueChange(!value)}
+      style={[
+        S.toggle,
+        { backgroundColor: value ? activeColor : colors.border },
+      ]}
+    >
+      <View
+        style={[
+          S.toggleThumb,
+          {
+            backgroundColor: '#fff',
+            transform: [{ translateX: value ? 20 : 2 }],
+          },
+        ]}
+      />
+    </TouchableOpacity>
+  );
+};
+
+// ─── Row ─────────────────────────────────────────────────────────────────────
+interface RowProps {
+  icon: string;
+  label: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  colors: any;
+  danger?: boolean;
+}
+
+const Row: React.FC<RowProps> = ({
+  icon,
+  label,
+  subtitle,
+  right,
+  onPress,
+  colors,
+  danger,
+}) => (
+  <TouchableOpacity
+    style={[S.row, { borderBottomColor: colors.border }]}
+    onPress={onPress}
+    activeOpacity={onPress ? 0.6 : 1}
+    disabled={!onPress}
+  >
+    <MCI
+      name={icon}
+      size={20}
+      color={danger ? '#EF4444' : colors.textSecondary}
+      style={S.rowIcon}
+    />
+    <View style={S.rowContent}>
+      <Text
+        style={[S.rowLabel, { color: danger ? '#EF4444' : colors.text }]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      {subtitle ? (
+        <Text
+          style={[S.rowSub, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
+          {subtitle}
+        </Text>
+      ) : null}
+    </View>
+    {right ?? null}
+  </TouchableOpacity>
+);
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+const SettingsScreen: React.FC<SettingsTabScreenProps> = ({
+  navigation: _navigation,
+}) => {
   const { colors } = useTheme();
   const { t, language, setLanguage } = useLocalization();
   const { metricUnits, setMetricUnits } = useMetricUnits();
-  
-  // 2. Access the Firebase user and logout function
   const { user, logout } = useAuth();
+  const ble = useTelemetry();
+
   const [faultAlerts, setFaultAlerts] = useState(true);
   const [maintenanceReminders, setMaintenanceReminders] = useState(true);
-  const [languageModalVisible, setLanguageModalVisible] = useState(false);
+  const [langModal, setLangModal] = useState(false);
 
-  const languages: Array<{ id: Language; label: string }> = [
-    { id: 'en', label: 'English' },
-    { id: 'es', label: 'Español' },
-    { id: 'mn', label: 'Монгол' },
+  const languages: Array<{ id: Language; label: string; flag: string }> = [
+    { id: 'mn', label: 'Монгол', flag: '🇲🇳' },
+    { id: 'en', label: 'English', flag: '🇺🇸' },
+    { id: 'ja', label: '日本語', flag: '🇯🇵' },
   ];
 
-  const handleLanguageChange = (lang: Language) => {
+  const currentLangLabel =
+    languages.find(l => l.id === language)?.label ?? language;
+
+  const handleLang = (lang: Language) => {
     setLanguage(lang);
-    setLanguageModalVisible(false);
+    setLangModal(false);
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader vehicleName="FuelFlow" />
-      {/* Account Section */}
-<Text style={[styles.sectionHeader, { color: colors.text, marginTop: 16 }]}>
-  {t('account') || 'Account'}
-</Text>
+    <View style={[S.root, { backgroundColor: colors.background }]}>
+      <AppHeader />
 
-<Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-  <View style={styles.settingRow}>
-    <View style={styles.settingInfo}>
-      <Text style={[styles.settingLabel, { color: colors.text }]}>
-        {user?.displayName || 'User'}
-      </Text>
-      <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-        {user?.email}
-      </Text>
-    </View>
-    <TouchableOpacity 
-      onPress={logout}
-      style={[styles.logoutButton, { backgroundColor: colors.error || '#FF4444' }]}
-    >
-      <Text style={styles.logoutText}>{t('logout') || 'Logout'}</Text>
-    </TouchableOpacity>
-  </View>
-</Card>
       <ScrollView
-        style={[styles.container, { backgroundColor: colors.background }]}
+        style={S.scroll}
+        contentContainerStyle={S.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Preferences Section */}
-        <Text style={[styles.sectionHeader, { color: colors.text }]}>
-        {t('preferences')}
-      </Text>
-
-      {/* Language Setting */}
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: colors.text }]}>
-              {t('language')}
-            </Text>
-            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-              {languages.find(l => l.id === language)?.label || language}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setLanguageModalVisible(true)}
-            style={styles.settingControl}
-          >
-            <Text style={[styles.chevron, { color: colors.textSecondary }]}>›</Text>
-          </TouchableOpacity>
-        </View>
-      </Card>
-
-      {/* Metric Units Toggle */}
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: colors.text }]}>
-              {t('metric_units')}
-            </Text>
-            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-              {metricUnits ? 'km/h, L/100km' : 'mph, mpg'}
-            </Text>
-          </View>
-          <Switch
-            style={styles.settingControl}
-            value={metricUnits}
-            onValueChange={setMetricUnits}
-            trackColor={{
-              false: colors.border,
-              true: colors.primary,
-            }}
-            thumbColor={metricUnits ? colors.primary : colors.textSecondary}
+        {/* ── Account ── */}
+        <Text style={[S.section, { color: colors.textSecondary }]}>
+          {t('account')}
+        </Text>
+        <View
+          style={[
+            S.card,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Row
+            icon="account-circle-outline"
+            label={user?.displayName || 'User'}
+            subtitle={user?.email ?? ''}
+            colors={colors}
+          />
+          <Row
+            icon="logout"
+            label={t('logout')}
+            onPress={logout}
+            colors={colors}
+            danger
           />
         </View>
-      </Card>
 
-      {/* Notifications Section */}
-      <Text style={[styles.sectionHeader, { color: colors.text, marginTop: 32 }]}>
-        {t('notifications')}
-      </Text>
-
-      {/* Fault Alerts Toggle */}
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: colors.text }]}>
-              {t('fault_alerts')}
-            </Text>
-            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-              {t('fault_notifications')}
-            </Text>
-          </View>
-          <Switch
-            style={styles.settingControl}
-            value={faultAlerts}
-            onValueChange={setFaultAlerts}
-            trackColor={{
-              false: colors.border,
-              true: colors.primary,
-            }}
-            thumbColor={faultAlerts ? colors.primary : colors.textSecondary}
+        {/* ── BLE Connection ── */}
+        <Text style={[S.section, { color: colors.textSecondary }]}>
+          ESP32 BLE
+        </Text>
+        <View
+          style={[
+            S.card,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: ble.isConnected ? '#22C55E40' : colors.border,
+            },
+          ]}
+        >
+          <Row
+            icon={ble.isConnected ? 'bluetooth-connect' : 'bluetooth'}
+            label="FuelFlow-ESP32"
+            subtitle={
+              ble.isConnected
+                ? '● Connected'
+                : ble.bleStatus === 'scanning'
+                ? 'Scanning...'
+                : ble.bleStatus === 'connecting'
+                ? 'Connecting...'
+                : ble.bleError ?? 'Not connected'
+            }
+            colors={colors}
+            right={
+              ble.bleStatus === 'scanning' || ble.bleStatus === 'connecting' ? (
+                <ActivityIndicator size="small" color={ORANGE} />
+              ) : ble.isConnected ? (
+                <TouchableOpacity
+                  onPress={ble.disconnect}
+                  style={S.bleBtn}
+                >
+                  <MCI name="close" size={18} color="#EF4444" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={ble.connect}
+                  style={[S.bleBtn, { backgroundColor: `${ORANGE}15` }]}
+                >
+                  <MCI name="magnify" size={18} color={ORANGE} />
+                </TouchableOpacity>
+              )
+            }
           />
         </View>
-      </Card>
 
-      {/* Maintenance Reminders Toggle */}
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.settingRow}>
-          <View style={styles.settingInfo}>
-            <Text style={[styles.settingLabel, { color: colors.text }]}>
-              {t('maintenance_reminders')}
-            </Text>
-            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-              {t('service_notifications')}
-            </Text>
-          </View>
-          <Switch
-            style={styles.settingControl}
-            value={maintenanceReminders}
-            onValueChange={setMaintenanceReminders}
-            trackColor={{
-              false: colors.border,
-              true: colors.primary,
-            }}
-            thumbColor={maintenanceReminders ? colors.primary : colors.textSecondary}
+        {/* ── Preferences ── */}
+        <Text style={[S.section, { color: colors.textSecondary }]}>
+          {t('preferences')}
+        </Text>
+        <View
+          style={[
+            S.card,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Row
+            icon="translate"
+            label={t('language')}
+            subtitle={currentLangLabel}
+            onPress={() => setLangModal(true)}
+            colors={colors}
+            right={
+              <MCI name="chevron-right" size={20} color={colors.textSecondary} />
+            }
+          />
+          <Row
+            icon="ruler"
+            label={t('metric_units')}
+            subtitle={metricUnits ? 'km/h, L/100km' : 'mph, mpg'}
+            colors={colors}
+            right={
+              <Toggle value={metricUnits} onValueChange={setMetricUnits} />
+            }
           />
         </View>
-      </Card>
 
-      {/* Connection Section */}
-      <Text style={[styles.sectionHeader, { color: colors.text, marginTop: 32 }]}>
-        {t('connection')}
-      </Text>
-
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-            {t('obd_protocol')}
-          </Text>
-          <Text style={[styles.infoValue, { color: colors.text }]}>
-            {t('can_protocol')}
-          </Text>
-        </View>
-        
-        <View style={[styles.infoDivider, { borderColor: colors.border }]} />
-        
-        <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-            {t('device')}
-          </Text>
-          <Text style={[styles.infoValue, { color: colors.text }]}>
-            {t('elm_device')}
-          </Text>
-        </View>
-
-        <View style={[styles.infoDivider, { borderColor: colors.border }]} />
-        
-        <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-            {t('signal_strength')}
-          </Text>
-          <Text style={[styles.infoValue, { color: colors.success }]}>
-            ● {t('signal_excellent')}
-          </Text>
-        </View>
-      </Card>
-
-      {/* About Section */}
-      <Text style={[styles.sectionHeader, { color: colors.text, marginTop: 32 }]}>
-        {t('about')}
-      </Text>
-
-      <Card style={[styles.settingCard, { borderColor: colors.border, backgroundColor: colors.cardBackground }]}>
-        <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-            {t('app_version')}
-          </Text>
-          <Text style={[styles.infoValue, { color: colors.text }]}>
-            2.1.0
-          </Text>
+        {/* ── Notifications ── */}
+        <Text style={[S.section, { color: colors.textSecondary }]}>
+          {t('notifications')}
+        </Text>
+        <View
+          style={[
+            S.card,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Row
+            icon="alert-circle-outline"
+            label={t('fault_alerts')}
+            subtitle={t('fault_notifications')}
+            colors={colors}
+            right={
+              <Toggle value={faultAlerts} onValueChange={setFaultAlerts} />
+            }
+          />
+          <Row
+            icon="wrench-outline"
+            label={t('maintenance_reminders')}
+            subtitle={t('service_notifications')}
+            colors={colors}
+            right={
+              <Toggle
+                value={maintenanceReminders}
+                onValueChange={setMaintenanceReminders}
+              />
+            }
+          />
         </View>
 
-        <View style={[styles.infoDivider, { borderColor: colors.border }]} />
+        <View style={S.bottomSpacer} />
+      </ScrollView>
 
-        <View style={styles.infoRow}>
-          <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
-            Database
-          </Text>
-          <Text style={[styles.infoValue, { color: colors.text }]}>
-            OBD-II 2026.1
-          </Text>
-        </View>
-      </Card>
-
-      {/* Bottom Spacing */}
-      <View style={{ height: 40 }} />
-
-      {/* Language Selection Modal */}
+      {/* ── Language Modal ── */}
       <Modal
-        visible={languageModalVisible}
+        visible={langModal}
         transparent
         animationType="fade"
-        onRequestClose={() => setLanguageModalVisible(false)}
+        onRequestClose={() => setLangModal(false)}
       >
-        <View style={[styles.modalOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-          <Card
+        <Pressable style={S.overlay} onPress={() => setLangModal(false)}>
+          <View
             style={[
-              styles.modalContent,
-              { backgroundColor: colors.cardBackground },
+              S.sheet,
+              {
+                backgroundColor: colors.cardBackground,
+                borderColor: colors.border,
+              },
             ]}
           >
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
+            <Text style={[S.sheetTitle, { color: colors.text }]}>
               {t('language')}
             </Text>
-
-            <FlatList
-              data={languages}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
+            {languages.map(lang => {
+              const selected = lang.id === language;
+              return (
                 <TouchableOpacity
+                  key={lang.id}
                   style={[
-                    styles.languageOption,
-                    language === item.id 
-                      ? { backgroundColor: colors.primary } 
-                      : { backgroundColor: colors.border },
+                    S.langRow,
+                    {
+                      backgroundColor: selected
+                        ? `${ORANGE}18`
+                        : 'transparent',
+                      borderColor: selected ? ORANGE : colors.border,
+                    },
                   ]}
-                  onPress={() => handleLanguageChange(item.id)}
+                  onPress={() => handleLang(lang.id)}
+                  activeOpacity={0.7}
                 >
+                  <Text style={S.langFlag}>{lang.flag}</Text>
                   <Text
                     style={[
-                      styles.languageOptionText,
-                      {
-                        color:
-                          language === item.id ? '#FFFFFF' : colors.text,
-                      },
+                      S.langLabel,
+                      { color: selected ? ORANGE : colors.text },
                     ]}
                   >
-                    {item.label}
+                    {lang.label}
                   </Text>
+                  {selected && <MCI name="check" size={20} color={ORANGE} />}
                 </TouchableOpacity>
-              )}
-            />
-
+              );
+            })}
             <TouchableOpacity
-              onPress={() => setLanguageModalVisible(false)}
-              style={[styles.closeButton, { backgroundColor: colors.primary }]}
+              style={[S.sheetClose, { backgroundColor: ORANGE }]}
+              onPress={() => setLangModal(false)}
             >
-              <Text style={[styles.closeButtonText, { color: '#FFFFFF' }]}>
-                Close
-              </Text>
+              <Text style={S.sheetCloseText}>{t('close')}</Text>
             </TouchableOpacity>
-          </Card>
-        </View>
+          </View>
+        </Pressable>
       </Modal>
-    </ScrollView>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  sectionHeader: {
-    fontSize: 16,
+const S = StyleSheet.create({
+  root: { flex: 1 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 40 },
+
+  section: {
+    fontSize: 11,
     fontWeight: '700',
-    marginBottom: 12,
+    letterSpacing: 1,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginTop: 24,
+    marginBottom: 8,
+    marginLeft: 4,
   },
-  settingCard: {
-    marginBottom: 12,
+
+  card: {
+    borderRadius: 14,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 16,
+    overflow: 'hidden',
+  },
+
+  // Row
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
     paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  rowIcon: { marginRight: 14 },
+  rowContent: { flex: 1 },
+  rowLabel: { fontSize: 15, fontWeight: '600' },
+  rowSub: { fontSize: 12, marginTop: 2 },
+
+  // Toggle
+  toggle: {
+    width: 46,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: 'center',
   },
-  settingInfo: {
+  toggleThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+
+  bottomSpacer: { height: 20 },
+
+  // Modal
+  overlay: {
     flex: 1,
-    paddingRight: 12,
-  },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  settingDescription: {
-    fontSize: 13,
-    marginTop: 4,
-    fontWeight: '400',
-  },
-  settingValue: {
-    fontSize: 13,
-    marginTop: 4,
-  },
-  settingControl: {
-    marginLeft: 12,
-  },
-  chevron: {
-    fontSize: 28,
-    fontWeight: '300',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 0,
-  },
-  infoLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  infoValue: {
-    fontSize: 13,
-    fontWeight: '500',
-    fontFamily: 'Courier New',
-  },
-  infoDivider: {
-    height: 0.5,
-    borderTopWidth: 0.5,
-  },
-  modalOverlay: {
-    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContent: {
-    width: '80%',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    maxHeight: '70%',
+  sheet: {
+    width: '82%',
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 20,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 16,
-  },
-  languageOption: {
+  sheetTitle: { fontSize: 18, fontWeight: '700', marginBottom: 16 },
+  langRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
     marginBottom: 8,
+    gap: 12,
   },
-  languageOptionText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  closeButton: {
-    marginTop: 16,
+  langFlag: { fontSize: 22 },
+  langLabel: { fontSize: 16, fontWeight: '600', flex: 1 },
+  sheetClose: {
+    marginTop: 12,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     alignItems: 'center',
   },
-  closeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  sheetCloseText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  bleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  logoutButton: {
-  paddingHorizontal: 16,
-  paddingVertical: 8,
-  borderRadius: 8,
-},
-logoutText: {
-  color: '#FFFFFF',
-  fontWeight: '600',
-  fontSize: 14,
-},
 });
 
 export default SettingsScreen;

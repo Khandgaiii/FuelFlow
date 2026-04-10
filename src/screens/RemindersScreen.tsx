@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -8,7 +8,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import firestore from '@react-native-firebase/firestore';
+import { getApp } from '@react-native-firebase/app';
+import {
+  doc,
+  getDoc,
+  getFirestore,
+  serverTimestamp,
+  setDoc,
+} from '@react-native-firebase/firestore';
 import { Icon } from '../components/Icon';
 import { RemindersTabScreenProps } from '../types/navigation';
 import { useTheme } from '../context/ThemeContext';
@@ -60,7 +67,13 @@ const EMPTY_REMINDERS: RemindersData = {
 };
 
 // --- Leaflet OSM Map HTML ---
-const buildMapHTML = (lat: number, lng: number, stationName: string, stationKm: number, isDark: boolean) => `
+const buildMapHTML = (
+  lat: number,
+  lng: number,
+  stationName: string,
+  stationKm: number,
+  isDark: boolean,
+) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -99,7 +112,7 @@ const buildMapHTML = (lat: number, lng: number, stationName: string, stationKm: 
     var map = L.map('map', {
       center: [${lat}, ${lng}],
       zoom: 15,
-      zoomControl: false,
+      zoomControl: true,
       attributionControl: false,
     });
 
@@ -108,19 +121,25 @@ const buildMapHTML = (lat: number, lng: number, stationName: string, stationKm: 
       ${isDark ? "className: 'dark-tiles'," : ''}
     }).addTo(map);
 
-    ${isDark ? `
+    ${
+      isDark
+        ? `
     // Dark filter via CSS injection
     var style = document.createElement('style');
     style.innerHTML = '.leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }';
     document.head.appendChild(style);
-    ` : ''}
+    `
+        : ''
+    }
 
     // Station marker
     var pinIcon = L.divIcon({ className: '', html: '<div class="custom-pin"></div>', iconSize: [14,14], iconAnchor: [7,7] });
     L.marker([${lat}, ${lng}], { icon: pinIcon }).addTo(map);
 
     // Label
-    var label = '${stationName !== '—' ? stationName : 'Ойрын шатахуун'}${stationKm > 0 ? ` · ${stationKm} km` : ''}';
+    var label = '${stationName !== '—' ? stationName : 'Ойрын шатахуун'}${
+  stationKm > 0 ? ` · ${stationKm} km` : ''
+}';
     L.marker([${lat}, ${lng}], {
       icon: L.divIcon({ className: '', html: '<div class="station-label">' + label + '</div>', iconSize: [0,0], iconAnchor: [-16, 28] })
     }).addTo(map);
@@ -144,35 +163,81 @@ interface StatCardProps {
 }
 
 const StatCard: React.FC<StatCardProps> = ({
-  label, value, unit, barColor, maxValue = 100, badgeText, badgeColor, subStats, colors, noData,
+  label,
+  value,
+  unit,
+  barColor,
+  maxValue = 100,
+  badgeText,
+  badgeColor,
+  subStats,
+  colors,
+  noData,
 }) => {
   const pct = Math.min((value / maxValue) * 100, 100);
+  const statValueColorStyle = {
+    color: noData ? colors.textSecondary : barColor,
+  };
+  const statUnitStyle = { color: barColor, opacity: 0.6 };
+  const statFillStyle = {
+    backgroundColor: barColor,
+    width: noData ? '0%' : `${pct}%`,
+  };
   return (
-    <View style={[cardStyles.card, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+    <View
+      style={[
+        cardStyles.card,
+        { backgroundColor: colors.cardBackground, borderColor: colors.border },
+      ]}
+    >
       <View style={[cardStyles.topBar, { backgroundColor: barColor }]} />
       <View style={cardStyles.header}>
-        <Text style={[cardStyles.label, { color: colors.textSecondary }]}>{label}</Text>
+        <Text style={[cardStyles.label, { color: colors.textSecondary }]}>
+          {label}
+        </Text>
         {badgeText && badgeColor && (
-          <View style={[cardStyles.badge, { backgroundColor: `${badgeColor}20` }]}>
-            <Text style={[cardStyles.badgeText, { color: badgeColor }]}>{badgeText}</Text>
+          <View
+            style={[cardStyles.badge, { backgroundColor: `${badgeColor}20` }]}
+          >
+            <Text style={[cardStyles.badgeText, { color: badgeColor }]}>
+              {badgeText}
+            </Text>
           </View>
         )}
       </View>
       <View style={cardStyles.valueRow}>
-        <Text style={[cardStyles.bigValue, { color: noData ? 'rgba(255,255,255,0.15)' : barColor }]}>
+        <Text style={[cardStyles.bigValue, statValueColorStyle]}>
           {noData ? '—' : value}
         </Text>
-        <Text style={[cardStyles.unit, { color: barColor, opacity: 0.6 }]}>{unit}</Text>
+        <Text style={[cardStyles.unit, statUnitStyle]}>{unit}</Text>
       </View>
       <View style={[cardStyles.track, { backgroundColor: colors.border }]}>
-        <View style={[cardStyles.fill, { backgroundColor: barColor, width: noData ? '0%' : `${pct}%` }]} />
+        <View style={[cardStyles.fill, statFillStyle]} />
       </View>
       {subStats && (
         <View style={cardStyles.subStatsRow}>
           {subStats.map((s, i) => (
-            <View key={i} style={[cardStyles.subStatBox, { backgroundColor: `${colors.border}50` }]}>
-              <Text style={[cardStyles.subStatLabel, { color: colors.textSecondary }]}>{s.label}</Text>
-              <Text style={[cardStyles.subStatValue, { color: noData ? colors.textSecondary : colors.text }]}>
+            <View
+              key={i}
+              style={[
+                cardStyles.subStatBox,
+                { backgroundColor: `${colors.border}50` },
+              ]}
+            >
+              <Text
+                style={[
+                  cardStyles.subStatLabel,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {s.label}
+              </Text>
+              <Text
+                style={[
+                  cardStyles.subStatValue,
+                  { color: noData ? colors.textSecondary : colors.text },
+                ]}
+              >
                 {noData ? '—' : s.value}
               </Text>
             </View>
@@ -184,127 +249,190 @@ const StatCard: React.FC<StatCardProps> = ({
 };
 
 const cardStyles = StyleSheet.create({
-  card: { borderRadius: 16, borderWidth: 1, marginBottom: 12, overflow: 'hidden', padding: 16 },
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+    overflow: 'hidden',
+    padding: 16,
+  },
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 3 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 8 },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 8,
+  },
   label: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 0.5 },
-  valueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4, marginBottom: 10 },
-  bigValue: { fontSize: 40, fontWeight: '800', fontFamily: 'Courier New', letterSpacing: -1 },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    marginBottom: 10,
+  },
+  bigValue: {
+    fontSize: 40,
+    fontWeight: '800',
+    fontFamily: 'Courier New',
+    letterSpacing: -1,
+  },
   unit: { fontSize: 18, fontWeight: '700', fontFamily: 'Courier New' },
   track: { height: 5, borderRadius: 3, overflow: 'hidden', marginBottom: 12 },
   fill: { height: '100%', borderRadius: 3 },
   subStatsRow: { flexDirection: 'row', gap: 8 },
-  subStatBox: { flex: 1, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10 },
-  subStatLabel: { fontSize: 9, fontWeight: '600', letterSpacing: 0.5, marginBottom: 3 },
+  subStatBox: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  subStatLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginBottom: 3,
+  },
   subStatValue: { fontSize: 12, fontWeight: '700', fontFamily: 'Courier New' },
 });
 
 // --- Main Screen ---
-const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
+const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
+  navigation: _navigation,
+}) => {
   const { colors } = useTheme();
   const { t } = useLocalization();
   const { user } = useAuth();
+  const db = getFirestore(getApp());
 
   const [data, setData] = useState<RemindersData>(EMPTY_REMINDERS);
   const [isFetching, setIsFetching] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [hasPermissionError, setHasPermissionError] = useState(false);
 
-  const isDark = colors.background === '#000000' || colors.background === '#000'
-    || (colors.background ?? '').toLowerCase() < '#888888';
+  const isDark =
+    colors.background === '#000000' ||
+    colors.background === '#000' ||
+    (colors.background ?? '').toLowerCase() < '#888888';
 
   // --- Firestore: users/{uid}/reminders/latest ---
-  const fetchReminders = async () => {
+  const fetchReminders = useCallback(async () => {
     if (!user?.uid) return;
     setIsFetching(true);
     try {
-      const docRef = firestore()
-        .collection('users')
-        .doc(user.uid)
-        .collection('reminders')
-        .doc('latest');
+      const docRef = doc(db, 'users', user.uid, 'reminders', 'latest');
 
-      const docSnap = await docRef.get();
+      const docSnap = await getDoc(docRef);
 
-      if (docSnap.exists()) {
-        setData(docSnap.data() as RemindersData);
+      const snapData = docSnap.data();
+      if (snapData) {
+        setData({ ...EMPTY_REMINDERS, ...snapData } as RemindersData);
       } else {
-        console.log(`[FuelFlow] No reminders for UID ${user.uid} — initializing...`);
-        await docRef.set({
+        console.log(
+          `[FuelFlow] No reminders for UID ${user.uid} — initializing...`,
+        );
+        await setDoc(docRef, {
           ...EMPTY_REMINDERS,
-          lastUpdated: firestore.FieldValue.serverTimestamp(),
+          lastUpdated: serverTimestamp(),
         });
         setData(EMPTY_REMINDERS);
       }
-    } catch (err) {
+      setHasPermissionError(false);
+    } catch (err: any) {
+      if (err?.code === 'firestore/permission-denied') {
+        setHasPermissionError(true);
+        setData(EMPTY_REMINDERS);
+        return;
+      }
       console.error('[FuelFlow] Reminders fetch error:', err);
     } finally {
       setIsFetching(false);
       setIsInitialLoad(false);
     }
-  };
+  }, [db, user?.uid]);
 
   useEffect(() => {
     fetchReminders();
-  }, [user]);
+  }, [fetchReminders]);
 
   const noData = data.fuelLevelPercent === 0 && data.oilLifePercent === 0;
 
-  const oilBadge = data.oilLifePercent > 0 && data.oilLifePercent <= 20
-    ? { text: 'СОЛИХ ШААРДЛАГАТАЙ', color: colors.warning }
-    : null;
+  const oilBadge =
+    data.oilLifePercent > 0 && data.oilLifePercent <= 20
+      ? { text: t('oil_change_needed'), color: colors.warning }
+      : null;
 
-  const fuelBadge = data.fuelLevelPercent > 0 && data.fuelLevelPercent <= 15
-    ? { text: 'БАГА БАЙНА', color: colors.danger }
-    : null;
+  const fuelBadge =
+    data.fuelLevelPercent > 0 && data.fuelLevelPercent <= 15
+      ? { text: t('fuel_low'), color: colors.danger }
+      : null;
+  const scrollContentStyle = styles.scrollContent;
+  const noDataBannerColorsStyle = styles.noDataBannerColors;
+  const tipsTitleStyle = styles.tipsTitle;
 
   if (isInitialLoad) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+      <View
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.primary} />
         <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Сануулагч ачааллаж байна...
+          {t('loading_reminders')}
         </Text>
       </View>
     );
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <AppHeader vehicleName="FuelFlow" />
+    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <AppHeader />
       <ScrollView
+        className="flex-1"
         style={[styles.container, { backgroundColor: colors.background }]}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 48 }}
+        contentContainerStyle={scrollContentStyle}
       >
-
         {/* ── Section Header ── */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>САНУУЛАГЧ</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+            {t('reminders_header')}
+          </Text>
           <TouchableOpacity
             style={[styles.refreshBtn, { borderColor: colors.border }]}
             onPress={fetchReminders}
             disabled={isFetching}
           >
-            {isFetching
-              ? <ActivityIndicator size="small" color={colors.textSecondary} />
-              : <Icon name="refresh-cw" size={15} color={colors.textSecondary} />
-            }
+            {isFetching ? (
+              <ActivityIndicator size="small" color={colors.textSecondary} />
+            ) : (
+              <Icon name="refresh-cw" size={15} color={colors.textSecondary} />
+            )}
           </TouchableOpacity>
         </View>
 
         {/* ── No data banner ── */}
         {noData && (
-          <View style={[styles.noBanner, { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.2)' }]}>
+          <View
+            className="flex-row items-center"
+            style={[styles.noBanner, noDataBannerColorsStyle]}
+          >
             <Icon name="wifi-off" size={13} color="#F59E0B" />
-            <Text style={styles.noBannerText}>Машин холбогдоогүй — Өгөгдөл ирээгүй байна</Text>
+            <Text style={styles.noBannerText}>
+              {hasPermissionError
+                ? t('permission_error')
+                : t('no_connection_reminders')}
+            </Text>
           </View>
         )}
 
         {/* ── Oil Life Card ── */}
         <StatCard
-          label="ТОСНЫ ҮЛДЭГДЭЛ"
+          label={t('oil_remaining')}
           value={data.oilLifePercent}
           unit="%"
           barColor={colors.warning ?? '#F59E0B'}
@@ -312,8 +440,12 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
           badgeText={oilBadge?.text}
           badgeColor={oilBadge?.color}
           subStats={[
-            { label: 'ТОС ТӨРӨЛ', value: data.oilType },
-            { label: 'СҮҮЛИЙН СОЛИХ', value: data.lastOilServiceKm > 0 ? `${data.lastOilServiceKm} km` : '—' },
+            { label: t('oil_type_label'), value: data.oilType },
+            {
+              label: t('last_oil_change'),
+              value:
+                data.lastOilServiceKm > 0 ? `${data.lastOilServiceKm} km` : '—',
+            },
           ]}
           colors={colors}
           noData={noData}
@@ -321,7 +453,7 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
 
         {/* ── Fuel Level Card ── */}
         <StatCard
-          label="ШАТАХУУН"
+          label={t('fuel_label')}
           value={data.fuelLevelPercent}
           unit="%"
           barColor={colors.danger ?? '#EF4444'}
@@ -329,8 +461,15 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
           badgeText={fuelBadge?.text}
           badgeColor={fuelBadge?.color}
           subStats={[
-            { label: 'БАГТААМЖ', value: data.tankCapacityL > 0 ? `${data.tankCapacityL} L` : '—' },
-            { label: 'ЗАРЦУУЛАЛТ', value: data.avgConsumption > 0 ? `${data.avgConsumption} L/100` : '—' },
+            {
+              label: t('capacity_label'),
+              value: data.tankCapacityL > 0 ? `${data.tankCapacityL} L` : '—',
+            },
+            {
+              label: t('consumption_label'),
+              value:
+                data.avgConsumption > 0 ? `${data.avgConsumption} L/100` : '—',
+            },
           ]}
           colors={colors}
           noData={noData}
@@ -338,17 +477,29 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
 
         {/* ── Nearest Gas Station Map ── */}
         <View style={styles.mapSectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>ОЙРЫН ШАТАХУУН</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+            {t('nearest_station')}
+          </Text>
           {data.nearestStationKm > 0 && (
-            <View style={[styles.distanceBadge, { backgroundColor: `${colors.primary}20` }]}>
-              <Text style={[styles.distanceBadgeText, { color: colors.primary }]}>
+            <View
+              style={[
+                styles.distanceBadge,
+                { backgroundColor: `${colors.primary}20` },
+              ]}
+            >
+              <Text
+                style={[styles.distanceBadgeText, { color: colors.primary }]}
+              >
                 {data.nearestStationKm} km
               </Text>
             </View>
           )}
         </View>
 
-        <View style={[styles.mapCard, { borderColor: colors.border }]}>
+        <View
+          className="overflow-hidden rounded-2xl border"
+          style={[styles.mapCard, { borderColor: colors.border }]}
+        >
           <WebView
             source={{
               html: buildMapHTML(
@@ -360,15 +511,32 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
               ),
             }}
             style={styles.mapWebView}
-            scrollEnabled={false}
+            scrollEnabled
+            nestedScrollEnabled
             javaScriptEnabled
             domStorageEnabled
             originWhitelist={['*']}
+            allowsInlineMediaPlayback
           />
           {data.nearestStationName !== '—' && (
-            <View style={[styles.mapFooter, { backgroundColor: colors.cardBackground, borderTopColor: colors.border }]}>
-              <Icon name="map-pin" size={14} color={colors.danger ?? '#EF4444'} />
-              <Text style={[styles.mapFooterText, { color: colors.text }]} numberOfLines={1}>
+            <View
+              style={[
+                styles.mapFooter,
+                {
+                  backgroundColor: colors.cardBackground,
+                  borderTopColor: colors.border,
+                },
+              ]}
+            >
+              <Icon
+                name="map-pin"
+                size={14}
+                color={colors.danger ?? '#EF4444'}
+              />
+              <Text
+                style={[styles.mapFooterText, { color: colors.text }]}
+                numberOfLines={1}
+              >
                 {data.nearestStationName}
               </Text>
             </View>
@@ -376,13 +544,32 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
         </View>
 
         {/* ── Next Service ── */}
-        <View style={[styles.nextServiceCard, { backgroundColor: colors.cardBackground, borderColor: colors.border }]}>
+        <View
+          style={[
+            styles.nextServiceCard,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <View>
-            <Text style={[styles.nextServiceLabel, { color: colors.textSecondary }]}>
-              ДАРААГИЙН ЗАСВАР
+            <Text
+              style={[styles.nextServiceLabel, { color: colors.textSecondary }]}
+            >
+              {t('next_service')}
             </Text>
-            <Text style={[styles.nextServiceValue, { color: noData ? colors.textSecondary : colors.text }]}>
-              {noData ? '—' : `${data.nextServiceKm > 0 ? `${data.nextServiceKm} km` : '—'} / ${data.nextServiceDate}`}
+            <Text
+              style={[
+                styles.nextServiceValue,
+                { color: noData ? colors.textSecondary : colors.text },
+              ]}
+            >
+              {noData
+                ? '—'
+                : `${
+                    data.nextServiceKm > 0 ? `${data.nextServiceKm} km` : '—'
+                  } / ${data.nextServiceDate}`}
             </Text>
           </View>
           <Icon name="chevron-right" size={18} color={colors.textSecondary} />
@@ -390,21 +577,32 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
 
         {/* ── Tips ── */}
         <View style={styles.tipsSection}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary, marginBottom: 10 }]}>
-            ЗӨВЛӨМЖ
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: colors.textSecondary },
+              tipsTitleStyle,
+            ]}
+          >
+            {t('tips_header')}
           </Text>
-          {[
-            'Дугуйн даралтыг тогтмол шалгаж байх нь шатахуун хэмнэнэ.',
-            'Тэргэндээ шаардлагагүй ачаа авч явахаас зайлсхий.',
-            'Жигд хурдасч, жигд тормозлох нь хамгийн үр ашигтай.',
-          ].map((tip, i) => (
-            <View key={i} style={[styles.tipRow, { borderBottomColor: colors.border }]}>
-              <View style={[styles.tipDot, { backgroundColor: colors.warning ?? '#F59E0B' }]} />
-              <Text style={[styles.tipText, { color: colors.text }]}>{tip}</Text>
+          {[t('tip_tire'), t('tip_cargo'), t('tip_driving')].map((tip, i) => (
+            <View
+              key={i}
+              style={[styles.tipRow, { borderBottomColor: colors.border }]}
+            >
+              <View
+                style={[
+                  styles.tipDot,
+                  { backgroundColor: colors.warning ?? '#F59E0B' },
+                ]}
+              />
+              <Text style={[styles.tipText, { color: colors.text }]}>
+                {tip}
+              </Text>
             </View>
           ))}
         </View>
-
       </ScrollView>
     </View>
   );
@@ -412,56 +610,106 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({ navigation }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 48 },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
   loadingText: { fontSize: 13, fontWeight: '500' },
+  noDataBannerColors: {
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderColor: 'rgba(245,158,11,0.2)',
+  },
 
   sectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingTop: 20, paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 20,
+    paddingBottom: 12,
   },
   sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   refreshBtn: {
-    width: 34, height: 34, borderRadius: 10, borderWidth: 1,
-    alignItems: 'center', justifyContent: 'center',
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   noBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1, marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
   },
   noBannerText: { color: '#F59E0B', fontSize: 12, fontWeight: '500', flex: 1 },
 
   mapSectionHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingTop: 8, paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    paddingBottom: 10,
   },
   distanceBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   distanceBadgeText: { fontSize: 11, fontWeight: '700' },
 
   mapCard: {
-    borderRadius: 16, borderWidth: 1, overflow: 'hidden', marginBottom: 12,
-    height: 200,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginBottom: 12,
+    height: 300,
   },
   mapWebView: { flex: 1, backgroundColor: 'transparent' },
   mapFooter: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
   },
   mapFooterText: { fontSize: 12, fontWeight: '600', flex: 1 },
 
   nextServiceCard: {
-    borderRadius: 14, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 14,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 20,
   },
-  nextServiceLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, marginBottom: 4 },
-  nextServiceValue: { fontSize: 14, fontWeight: '700', fontFamily: 'Courier New' },
+  nextServiceLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  nextServiceValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    fontFamily: 'Courier New',
+  },
 
   tipsSection: { marginTop: 4 },
+  tipsTitle: { marginBottom: 10 },
   tipRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    paddingVertical: 11, borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 11,
+    borderBottomWidth: 1,
   },
   tipDot: { width: 6, height: 6, borderRadius: 3, marginTop: 5 },
   tipText: { fontSize: 13, lineHeight: 19, flex: 1 },

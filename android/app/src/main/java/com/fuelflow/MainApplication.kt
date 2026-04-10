@@ -1,4 +1,4 @@
-package com.fuelflow
+package com.fuelflow.moko
 
 import android.app.Application
 import com.facebook.react.PackageList

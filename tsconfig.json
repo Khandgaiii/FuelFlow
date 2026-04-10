@@ -9,6 +9,6 @@
     "types": ["jest", "node"],
     "target": "ES2015"
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],
   "exclude": ["**/node_modules", "**/Pods"]
 }

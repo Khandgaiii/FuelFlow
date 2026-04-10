@@ -3,6 +3,7 @@
  * React Native CLI with React Navigation
  */
 
+import './global.css';
 import React from 'react';
 import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { LocalizationProvider } from './src/context/LocalizationContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { MetricUnitsProvider } from './src/context/MetricUnitsContext';
+import { TelemetryProvider } from './src/context/TelemetryContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 
 function AppContent() {
@@ -32,13 +34,15 @@ function AppContent() {
 
 function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <ThemeProvider>
           <LocalizationProvider>
             <AuthProvider>
               <MetricUnitsProvider>
-                <AppContent />
+                <TelemetryProvider>
+                  <AppContent />
+                </TelemetryProvider>
               </MetricUnitsProvider>
             </AuthProvider>
           </LocalizationProvider>
@@ -49,3 +53,7 @@ function App() {
 }
 
 export default App;
+
+const styles = {
+  root: { flex: 1 as const },
+};

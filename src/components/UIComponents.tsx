@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  View,
-  StyleSheet,
-  Text,
-  Dimensions,
-} from 'react-native';
+import { View, Text } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
 interface CircularGaugeProps {
@@ -26,75 +21,54 @@ export const CircularGauge: React.FC<CircularGaugeProps> = ({
 }) => {
   const { colors } = useTheme();
   const percentage = (value / maxValue) * 100;
-  const circumference = 2 * Math.PI * (size / 2 - 8);
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+  const containerSizeStyle = { width: size, height: size };
+  const ringWrapStyle = { width: size, height: size, borderRadius: size / 2 };
+  const ringStyle = {
+    width: size - 16,
+    height: size - 16,
+    borderRadius: (size - 16) / 2,
+    borderColor: colors.border,
+    borderWidth: 8,
+  };
+  const colorRingStyle = {
+    width: size - 16,
+    height: size - 16,
+    borderRadius: (size - 16) / 2,
+    borderWidth: 8,
+    borderColor: ringColor,
+    opacity: percentage / 100,
+  };
+  const gaugeValueStyle = { color: colors.text, fontSize: 28 };
+  const gaugeUnitStyle = { color: colors.textSecondary, fontSize: 12 };
+  const gaugeLabelStyle = { color: colors.textSecondary };
 
   return (
-    <View style={[styles.container, { width: size, height: size }]}>
-      <View style={[styles.background, { width: size, height: size }]}>
+    <View className="items-center justify-center" style={containerSizeStyle}>
+      <View className="items-center justify-center" style={containerSizeStyle}>
         {/* Ring Background */}
         <View
-          style={[
-            styles.ringContainer,
-            {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-            },
-          ]}
+          className="absolute items-center justify-center"
+          style={ringWrapStyle}
         >
-          <View
-            style={[
-              styles.ring,
-              {
-                width: size - 16,
-                height: size - 16,
-                borderRadius: (size - 16) / 2,
-                borderColor: colors.border,
-                borderWidth: 8,
-              },
-            ]}
-          />
+          <View className="items-center justify-center" style={ringStyle} />
         </View>
 
         {/* Colored Ring - using border approach */}
-        <View
-          style={[
-            styles.coloredRing,
-            {
-              width: size - 16,
-              height: size - 16,
-              borderRadius: (size - 16) / 2,
-              borderWidth: 8,
-              borderColor: ringColor,
-              opacity: percentage / 100,
-            },
-          ]}
-        />
+        <View className="absolute" style={colorRingStyle} />
 
         {/* Center content */}
-        <View style={styles.centerContent}>
-          <Text
-            style={[
-              styles.value,
-              { color: colors.text, fontSize: 28, fontWeight: 'bold' },
-            ]}
-          >
+        <View className="z-10 items-center justify-center">
+          <Text className="font-bold" style={gaugeValueStyle}>
             {Math.round(value)}
           </Text>
-          <Text style={[styles.unit, { color: colors.textSecondary, fontSize: 12 }]}>
+          <Text className="mt-1" style={gaugeUnitStyle}>
             {unit}
           </Text>
         </View>
       </View>
 
       {/* Label below gauge */}
-      <Text
-        style={[
-          styles.label,
-          { color: colors.textSecondary, marginTop: 12, textAlign: 'center' },
-        ]}
-      >
+      <Text className="mt-3 text-center font-medium" style={gaugeLabelStyle}>
         {label}
       </Text>
     </View>
@@ -120,38 +94,31 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
 }) => {
   const { colors } = useTheme();
   const percentage = (value / maxValue) * 100;
+  const textStyle = { color: colors.text };
+  const trackStyle = {
+    backgroundColor: colors.border,
+    height,
+    borderRadius: height / 2,
+  };
+  const fillStyle = {
+    backgroundColor: barColor,
+    width: `${percentage}%`,
+    height,
+    borderRadius: height / 2,
+  };
 
   return (
-    <View style={styles.progressContainer}>
-      <View style={styles.progressHeader}>
-        <Text style={[styles.progressLabel, { color: colors.text }]}>
+    <View className="my-3">
+      <View className="mb-2 flex-row justify-between">
+        <Text className="text-sm font-medium" style={textStyle}>
           {label}
         </Text>
-        <Text style={[styles.progressValue, { color: colors.text }]}>
+        <Text className="text-sm font-semibold" style={textStyle}>
           {value} {unit}
         </Text>
       </View>
-      <View
-        style={[
-          styles.progressBarBackground,
-          {
-            backgroundColor: colors.border,
-            height,
-            borderRadius: height / 2,
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.progressBarFill,
-            {
-              backgroundColor: barColor,
-              width: `${percentage}%`,
-              height,
-              borderRadius: height / 2,
-            },
-          ]}
-        />
+      <View className="overflow-hidden" style={trackStyle}>
+        <View className="justify-center" style={fillStyle} />
       </View>
     </View>
   );
@@ -164,18 +131,13 @@ interface CardProps {
 
 export const Card: React.FC<CardProps> = ({ children, style }) => {
   const { colors } = useTheme();
+  const cardBaseStyle = {
+    backgroundColor: colors.cardBackground,
+    borderColor: colors.border,
+  };
 
   return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: colors.cardBackground,
-          borderColor: colors.border,
-        },
-        style,
-      ]}
-    >
+    <View className="rounded-2xl border p-4" style={[cardBaseStyle, style]}>
       {children}
     </View>
   );
@@ -197,138 +159,34 @@ export const InfoCard: React.FC<InfoCardProps> = ({
   icon,
 }) => {
   const { colors } = useTheme();
+  const infoCardContainerStyle = {
+    flex: 1,
+    marginHorizontal: 8,
+    marginVertical: 8,
+    minHeight: 140,
+  };
+  const infoTitleStyle = { color: colors.textSecondary };
+  const infoValueStyle = { color: colors.text };
+  const infoUnitStyle = { color: colors.textSecondary };
+  const tinyBarStyle = { backgroundColor: barColor, height: 3 };
 
   return (
-    <Card
-      style={{
-        flex: 1,
-        marginHorizontal: 8,
-        marginVertical: 8,
-        minHeight: 140,
-      }}
-    >
-      <View style={styles.infoCardContent}>
-        {icon && <View style={styles.iconContainer}>{icon}</View>}
-        <Text style={[styles.infoCardTitle, { color: colors.textSecondary }]}>
+    <Card style={infoCardContainerStyle}>
+      <View className="flex-1 justify-start">
+        {icon && <View className="mb-2">{icon}</View>}
+        <Text className="text-xs font-medium uppercase" style={infoTitleStyle}>
           {title}
         </Text>
-        <Text
-          style={[
-            styles.infoCardValue,
-            { color: colors.text, marginTop: 8 },
-          ]}
-        >
+        <Text className="mt-2 text-lg font-bold" style={infoValueStyle}>
           {value}
-          <Text style={[styles.infoCardUnit, { color: colors.textSecondary }]}>
+          <Text className="text-xs font-normal" style={infoUnitStyle}>
             {' '}
             {unit}
           </Text>
         </Text>
         {/* Small progress bar */}
-        <View
-          style={[
-            styles.tinyBar,
-            {
-              backgroundColor: barColor,
-              height: 3,
-              marginTop: 12,
-            },
-          ]}
-        />
+        <View className="mt-3 rounded-sm" style={tinyBarStyle} />
       </View>
     </Card>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  background: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ringContainer: {
-    position: 'absolute',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ring: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  coloredRing: {
-    position: 'absolute',
-  },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  value: {
-    fontWeight: 'bold',
-  },
-  unit: {
-    marginTop: 4,
-  },
-  label: {
-    fontWeight: '500',
-  },
-  progressContainer: {
-    marginVertical: 12,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  progressValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  progressBarBackground: {
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    justifyContent: 'center',
-  },
-  card: {
-    borderRadius: 16,
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    borderWidth: 1,
-  },
-  infoCardContent: {
-    flex: 1,
-    justifyContent: 'flex-start',
-  },
-  iconContainer: {
-    marginBottom: 8,
-  },
-  infoCardTitle: {
-    fontSize: 12,
-    fontWeight: '500',
-    textTransform: 'uppercase',
-  },
-  infoCardValue: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  infoCardUnit: {
-    fontSize: 12,
-    fontWeight: '400',
-  },
-  tinyBar: {
-    borderRadius: 2,
-  },
-});

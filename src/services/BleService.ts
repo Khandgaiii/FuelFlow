@@ -1,267 +1,234 @@
-import {
-  BleManager,
-  Device,
-  Characteristic,
-  Service,
-} from 'react-native-ble-plx';
+import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import { PermissionsAndroid, Platform } from 'react-native';
-import * as base64 from 'base-64';
+import { Buffer } from 'buffer';
 
-export interface BleDevice {
-  id: string;
-  name: string | null;
-  rssi: number | null;
-  isConnected: boolean;
+const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+const CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+const DEVICE_NAME = 'FuelFlow-ESP32';
+
+export interface Telemetry {
+  speed: number;
+  rpm: number;
+  fuelConsumption: number;
+  throttlePosition: number;
+  battery: number;
+  coolant: number;
+  oilPressure: number;
+  engineLoad: number;
 }
 
-class BleServiceClass {
+export const EMPTY_TELEMETRY: Telemetry = {
+  speed: 0,
+  rpm: 0,
+  fuelConsumption: 0,
+  throttlePosition: 0,
+  battery: 0,
+  coolant: 0,
+  oilPressure: 0,
+  engineLoad: 0,
+};
+
+export type BleStatus =
+  | 'idle'
+  | 'scanning'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'error';
+
+type TelemetryListener = (data: Telemetry) => void;
+type StatusListener = (status: BleStatus, msg?: string) => void;
+
+class BleService {
   private manager: BleManager;
-  private connectedDevice: Device | null = null;
-  private characteristic: Characteristic | null = null;
+  private device: Device | null = null;
+  private subscription: Subscription | null = null;
+  private onTelemetry: TelemetryListener | null = null;
+  private onStatus: StatusListener | null = null;
+  private status: BleStatus = 'idle';
 
   constructor() {
     this.manager = new BleManager();
   }
 
-  /**
-   * Request Bluetooth permissions from the user
-   */
+  setTelemetryListener(fn: TelemetryListener | null) {
+    this.onTelemetry = fn;
+  }
+
+  setStatusListener(fn: StatusListener | null) {
+    this.onStatus = fn;
+  }
+
+  getStatus(): BleStatus {
+    return this.status;
+  }
+
+  private setStatus(s: BleStatus, msg?: string) {
+    this.status = s;
+    this.onStatus?.(s, msg);
+  }
+
   async requestPermissions(): Promise<boolean> {
-    if (Platform.OS === 'android') {
-      const apiLevel = parseInt(Platform.Version.toString(), 10);
-
-      if (apiLevel >= 31) {
-        // For Android 12+
-        const scanGranted = await PermissionsAndroid.request(
+    if (Platform.OS !== 'android') return true;
+    try {
+      const perms: string[] = [
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      ];
+      if (Number(Platform.Version) >= 31) {
+        perms.push(
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          {
-            title: 'Bluetooth Scan Permission',
-            message: 'FuelFlow needs permission to scan for Bluetooth devices',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
-        );
-
-        const connectGranted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          {
-            title: 'Bluetooth Connect Permission',
-            message:
-              'FuelFlow needs permission to connect to Bluetooth devices',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
         );
-
-        return (
-          scanGranted === PermissionsAndroid.RESULTS.GRANTED &&
-          connectGranted === PermissionsAndroid.RESULTS.GRANTED
-        );
-      } else {
-        // For Android < 12
-        const locationGranted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: 'Location Permission',
-            message:
-              'FuelFlow needs location access to scan for Bluetooth devices',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
-        );
-
-        return locationGranted === PermissionsAndroid.RESULTS.GRANTED;
       }
-    }
-
-    // iOS permissions are handled via Info.plist
-    return true;
-  }
-
-  /**
-   * Start scanning for BLE devices
-   */
-  async startScan(
-    onDeviceFound: (device: BleDevice) => void,
-    onError: (error: Error) => void,
-  ): Promise<void> {
-    try {
-      const hasPermission = await this.requestPermissions();
-
-      if (!hasPermission) {
-        throw new Error('Bluetooth permissions denied');
-      }
-
-      this.manager.startDeviceScan(null, null, (error, device) => {
-        if (error) {
-          onError(error);
-          return;
-        }
-
-        if (device) {
-          const bleDevice: BleDevice = {
-            id: device.id,
-            name: device.name,
-            rssi: device.rssi,
-            isConnected: false,
-          };
-
-          onDeviceFound(bleDevice);
-        }
-      });
-    } catch (error) {
-      onError(error as Error);
+      const granted = await PermissionsAndroid.requestMultiple(
+        perms as Array<(typeof PermissionsAndroid.PERMISSIONS)[keyof typeof PermissionsAndroid.PERMISSIONS]>,
+      );
+      return Object.values(granted).every(
+        v => v === PermissionsAndroid.RESULTS.GRANTED,
+      );
+    } catch (e) {
+      console.warn('[BLE] Permission error:', e);
+      return false;
     }
   }
 
-  /**
-   * Stop scanning for devices
-   */
-  stopScan(): void {
-    this.manager.stopDeviceScan();
-  }
-
-  /**
-   * Connect to a specific BLE device
-   */
-  async connectToDevice(
-    deviceId: string,
-    characteristicUUID?: string,
-    serviceUUID?: string,
-  ): Promise<Device> {
-    try {
-      const device = await this.manager.connectToDevice(deviceId);
-
-      await device.discoverAllServicesAndCharacteristics();
-
-      this.connectedDevice = device;
-
-      // Store characteristic if UUIDs provided
-      if (serviceUUID && characteristicUUID) {
-        const services = await device.services();
-        const service = services.find(
-          s => s.uuid.toLowerCase() === serviceUUID.toLowerCase(),
-        );
-
-        if (service) {
-          const characteristics = await service.characteristics();
-          this.characteristic =
-            characteristics.find(
-              c => c.uuid.toLowerCase() === characteristicUUID.toLowerCase(),
-            ) || null;
-        }
-      }
-
-      return device;
-    } catch (error) {
-      throw new Error(`Failed to connect to device: ${error}`);
-    }
-  }
-
-  /**
-   * Disconnect from current device
-   */
-  async disconnect(): Promise<void> {
-    if (this.connectedDevice) {
-      try {
-        await this.manager.cancelDeviceConnection(this.connectedDevice.id);
-        this.connectedDevice = null;
-        this.characteristic = null;
-      } catch (error) {
-        throw new Error(`Failed to disconnect: ${error}`);
-      }
-    }
-  }
-
-  /**
-   * Write data to a characteristic
-   */
-  async writeData(data: string): Promise<void> {
-    if (!this.characteristic || !this.connectedDevice) {
-      throw new Error('No device or characteristic connected');
-    }
-
-    try {
-      const base64Data = base64.encode(data);
-      await this.characteristic.writeWithResponse(base64Data);
-    } catch (error) {
-      throw new Error(`Failed to write data: ${error}`);
-    }
-  }
-
-  /**
-   * Read data from characteristic
-   */
-  async readData(): Promise<string> {
-    if (!this.characteristic || !this.connectedDevice) {
-      throw new Error('No device or characteristic connected');
-    }
-
-    try {
-      const characteristic = await this.characteristic.read();
-      if (characteristic.value) {
-        return base64.decode(characteristic.value);
-      }
-      return '';
-    } catch (error) {
-      throw new Error(`Failed to read data: ${error}`);
-    }
-  }
-
-  /**
-   * Subscribe to characteristic notifications
-   */
-  async subscribeToCharacteristic(
-    onData: (data: string) => void,
-    onError: (error: Error) => void,
-  ): Promise<void> {
-    if (!this.characteristic || !this.connectedDevice) {
-      onError(new Error('No device or characteristic connected'));
+  async scanAndConnect(): Promise<void> {
+    const ok = await this.requestPermissions();
+    if (!ok) {
+      this.setStatus('error', 'Bluetooth permissions denied');
       return;
     }
 
-    try {
-      this.characteristic.monitor((error, characteristic) => {
-        if (error) {
-          onError(error);
-          return;
-        }
+    this.setStatus('scanning');
 
-        if (characteristic?.value) {
-          const data = Buffer.from(characteristic.value, 'base64').toString(
-            'utf8',
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.manager.stopDeviceScan();
+        this.setStatus('error', 'Device not found — is ESP32 powered on?');
+        reject(new Error('Scan timeout'));
+      }, 20000);
+
+      this.manager.startDeviceScan(
+        null,
+        { allowDuplicates: false },
+        async (error, scannedDevice) => {
+          if (error) {
+            clearTimeout(timeout);
+            this.setStatus('error', error.message);
+            reject(error);
+            return;
+          }
+
+          if (!scannedDevice) return;
+
+          const name = scannedDevice.name || scannedDevice.localName || '';
+          const matchesName = name === DEVICE_NAME;
+          const svcUuids = scannedDevice.serviceUUIDs ?? [];
+          const matchesUuid = svcUuids.some(
+            u => u.toLowerCase() === SERVICE_UUID.toLowerCase(),
           );
-          onData(data);
-        }
+
+          if (matchesName || matchesUuid) {
+            clearTimeout(timeout);
+            this.manager.stopDeviceScan();
+            console.log(
+              `[BLE] Found ${name} (${scannedDevice.id}) RSSI:${scannedDevice.rssi}`,
+            );
+            try {
+              await this.connectToDevice(scannedDevice);
+              resolve();
+            } catch (e: any) {
+              reject(e);
+            }
+          }
+        },
+      );
+    });
+  }
+
+  private async connectToDevice(d: Device): Promise<void> {
+    this.setStatus('connecting');
+    try {
+      const connected = await d.connect({ timeout: 10000 });
+      await connected.requestMTU(185);
+      await connected.discoverAllServicesAndCharacteristics();
+      this.device = connected;
+
+      const services = await connected.services();
+      console.log('[BLE] Services found:', services.map(s => s.uuid));
+      for (const svc of services) {
+        const chars = await svc.characteristics();
+        console.log(`[BLE]   ${svc.uuid} -> chars:`, chars.map(c => c.uuid));
+      }
+
+      this.setStatus('connected');
+
+      connected.onDisconnected(() => {
+        this.device = null;
+        this.subscription?.remove();
+        this.subscription = null;
+        this.setStatus('disconnected');
       });
-    } catch (error) {
-      onError(error as Error);
+
+      console.log('[BLE] Starting characteristic monitor...');
+      this.subscription = connected.monitorCharacteristicForService(
+        SERVICE_UUID,
+        CHARACTERISTIC_UUID,
+        (error, characteristic) => {
+          if (error) {
+            console.warn('[BLE] Monitor error:', error.message);
+            return;
+          }
+          if (characteristic?.value) {
+            try {
+              let raw: string;
+              try {
+                raw = Buffer.from(characteristic.value, 'base64').toString('utf-8');
+              } catch {
+                raw = atob(characteristic.value);
+              }
+              const parsed = JSON.parse(raw);
+              const telemetry: Telemetry = {
+                speed: Number(parsed.spd) || 0,
+                rpm: Number(parsed.rpm) || 0,
+                fuelConsumption: Number(parsed.fuel) || 0,
+                throttlePosition: Number(parsed.thr) || 0,
+                battery: Number(parsed.bat) || 0,
+                coolant: Number(parsed.cool) || 0,
+                oilPressure: Number(parsed.oil) || 0,
+                engineLoad: Number(parsed.eng) || 0,
+              };
+              this.onTelemetry?.(telemetry);
+            } catch (e) {
+              console.warn('[BLE] Parse error:', e, characteristic.value);
+            }
+          }
+        },
+      );
+    } catch (e: any) {
+      this.setStatus('error', e.message);
+      throw e;
     }
   }
 
-  /**
-   * Get connected device info
-   */
-  getConnectedDevice(): Device | null {
-    return this.connectedDevice;
+  async disconnect(): Promise<void> {
+    this.subscription?.remove();
+    this.subscription = null;
+    if (this.device) {
+      try {
+        await this.device.cancelConnection();
+      } catch {
+        // already disconnected
+      }
+      this.device = null;
+    }
+    this.setStatus('idle');
   }
 
-  /**
-   * Check if device is currently connected
-   */
-  isConnected(): boolean {
-    return this.connectedDevice !== null;
-  }
-
-  /**
-   * Destroy the BLE manager
-   */
-  destroy(): void {
+  destroy() {
+    this.disconnect();
     this.manager.destroy();
   }
 }
 
-export const bleService = new BleServiceClass();
+export const bleService = new BleService();

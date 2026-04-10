@@ -1,6 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, {
+  Path,
+  Circle,
+  Defs,
+  LinearGradient,
+  Stop,
+} from 'react-native-svg';
+import { useTheme } from '../context/ThemeContext';
 
 interface RadialGaugeProps {
   value: number;
@@ -11,13 +18,12 @@ interface RadialGaugeProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-// Build an SVG arc path from polar coordinates
 function describeArc(
   cx: number,
   cy: number,
   r: number,
   startAngle: number,
-  endAngle: number
+  endAngle: number,
 ): string {
   const toRad = (deg: number) => (deg * Math.PI) / 180;
 
@@ -39,16 +45,16 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   ringColor,
   size = 'sm',
 }) => {
+  const { colors } = useTheme();
   const dim = size === 'lg' ? 160 : size === 'md' ? 130 : 110;
   const strokeWidth = 8;
   const cx = dim / 2;
   const cy = dim / 2;
   const radius = (dim - strokeWidth * 2) / 2;
 
-  // Arc goes from 135° to 405° (270° sweep) — bottom-left to bottom-right
   const START_ANGLE = 135;
   const END_ANGLE = 405;
-  const SWEEP = END_ANGLE - START_ANGLE; // 270
+  const SWEEP = END_ANGLE - START_ANGLE;
 
   const clampedValue = Math.min(Math.max(value, 0), maxValue);
   const progress = clampedValue / maxValue;
@@ -57,20 +63,25 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   const trackPath = describeArc(cx, cy, radius, START_ANGLE, END_ANGLE);
   const fillPath =
     progress > 0
-      ? describeArc(cx, cy, radius, START_ANGLE, Math.max(fillEndAngle, START_ANGLE + 0.5))
+      ? describeArc(
+          cx,
+          cy,
+          radius,
+          START_ANGLE,
+          Math.max(fillEndAngle, START_ANGLE + 0.5),
+        )
       : null;
 
-  // Display value - for rpm divide by 1000
   const displayValue =
     unit === 'x1000' ? (value / 1000).toFixed(1) : String(value);
   const displayUnit = unit === 'x1000' ? 'RPM' : unit;
 
   const noData = value === 0;
-  const dimColor = 'rgba(255,255,255,0.07)';
+  const dimTrack = colors.border;
   const gradientId = `grad-${label.replace(/\s/g, '')}`;
 
   return (
-    <View style={styles.wrapper}>
+    <View style={S.wrap}>
       <Svg width={dim} height={dim}>
         <Defs>
           <LinearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
@@ -79,16 +90,14 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
           </LinearGradient>
         </Defs>
 
-        {/* Track (background arc) */}
         <Path
           d={trackPath}
-          stroke={dimColor}
+          stroke={dimTrack}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           fill="none"
         />
 
-        {/* Fill arc */}
         {fillPath && !noData && (
           <Path
             d={fillPath}
@@ -99,67 +108,64 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
           />
         )}
 
-        {/* Center dot */}
         <Circle
           cx={cx}
           cy={cy}
           r={3}
-          fill={noData ? dimColor : ringColor}
+          fill={noData ? dimTrack : ringColor}
           opacity={noData ? 1 : 0.6}
         />
       </Svg>
 
-      {/* Center text overlay */}
-      <View style={[styles.centerText, { width: dim, height: dim }]}>
+      <View style={[S.center, { width: dim, height: dim }]}>
         <Text
           style={[
-            styles.valueText,
-            { color: noData ? 'rgba(255,255,255,0.2)' : '#FFFFFF' },
-            size === 'lg' && { fontSize: 28 },
+            S.value,
+            {
+              fontSize: size === 'lg' ? 28 : 22,
+              color: noData ? colors.textSecondary : colors.text,
+            },
           ]}
         >
           {noData ? '—' : displayValue}
         </Text>
-        <Text style={styles.unitText}>{displayUnit}</Text>
+        <Text style={[S.unit, { color: colors.textSecondary }]}>
+          {displayUnit}
+        </Text>
       </View>
 
-      {/* Label below */}
-      <Text style={styles.labelText}>{label.toUpperCase()}</Text>
+      <Text style={[S.label, { color: colors.textSecondary }]}>
+        {label.toUpperCase()}
+      </Text>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  wrapper: {
-    alignItems: 'center',
-    position: 'relative',
-  },
-  centerText: {
+const S = StyleSheet.create({
+  wrap: { alignItems: 'center' },
+  center: {
     position: 'absolute',
     top: 0,
     left: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 1,
   },
-  valueText: {
-    fontSize: 22,
-    fontWeight: '800',
+  value: {
     fontFamily: 'Courier New',
+    fontWeight: '800',
     letterSpacing: -0.5,
-    color: '#FFFFFF',
   },
-  unitText: {
+  unit: {
     fontSize: 10,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.35)',
     letterSpacing: 0.8,
+    opacity: 0.5,
   },
-  labelText: {
+  label: {
+    marginTop: 4,
     fontSize: 10,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.3)',
     letterSpacing: 1.2,
-    marginTop: 4,
+    opacity: 0.45,
   },
 });

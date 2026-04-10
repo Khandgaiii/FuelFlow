@@ -1,7 +1,18 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from 'react';
+import { getApp } from '@react-native-firebase/app';
+import {
+  FirebaseAuthTypes,
+  getAuth,
+  onAuthStateChanged,
+  signOut,
+} from '@react-native-firebase/auth';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { View, Text, ActivityIndicator } from 'react-native';
 
 export interface AuthContextType {
   isLoggedIn: boolean;
@@ -10,29 +21,46 @@ export interface AuthContextType {
   initializing: boolean;
 }
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined,
+);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
+  const firebaseAuth = getAuth(getApp());
 
   // Handle user state changes
-  function onAuthStateChanged(user: FirebaseAuthTypes.User | null) {
-    setUser(user);
-    if (initializing) setInitializing(false);
-  }
+  const handleAuthStateChanged = useCallback(
+    (currentUser: FirebaseAuthTypes.User | null) => {
+      setUser(currentUser);
+      if (initializing) setInitializing(false);
+    },
+    [initializing],
+  );
 
   useEffect(() => {
-    // This is the "Heartbeat" listener
-    const subscriber = auth().onAuthStateChanged(onAuthStateChanged);
+    const subscriber = onAuthStateChanged(firebaseAuth, handleAuthStateChanged);
     return subscriber; // unsubscribe on unmount
-  }, []);
+  }, [firebaseAuth, handleAuthStateChanged]);
 
   const logout = async () => {
     try {
-      await GoogleSignin.signOut(); // Sign out of Google
-      await auth().signOut();       // Sign out of Firebase
-    } catch (error) {
+      const hasGoogleSession = await GoogleSignin.hasPreviousSignIn();
+      if (hasGoogleSession) {
+        await GoogleSignin.signOut(); // Sign out of Google if session exists
+      }
+
+      // Firebase throws auth/no-current-user when already signed out.
+      if (firebaseAuth.currentUser) {
+        await signOut(firebaseAuth);
+      }
+    } catch (error: any) {
+      if (error?.code === 'auth/no-current-user') {
+        return;
+      }
       console.error('Logout error:', error);
     }
   };
@@ -45,11 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Force it to show children even if initializing is true
-return (
-  <AuthContext.Provider value={value}>
-    {children} 
-  </AuthContext.Provider>
-);
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {

@@ -1,4 +1,4 @@
-package com.fuelflow
+package com.fuelflow.moko
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

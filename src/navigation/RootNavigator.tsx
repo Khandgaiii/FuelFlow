@@ -1,20 +1,10 @@
 import React from 'react';
-import {
-  NavigationContainer,
-} from '@react-navigation/native';
-import {
-  createNativeStackNavigator,
-} from '@react-navigation/native-stack';
-import {
-  createBottomTabNavigator,
-} from '@react-navigation/bottom-tabs';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
-import { Icon } from '../components/Icon';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MCI from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalization } from '../context/LocalizationContext';
 import { useAuth } from '../context/AuthContext';
@@ -29,251 +19,190 @@ import SettingsScreen from '../screens/SettingsScreen';
 // Types
 import { AuthStackParamList, AppTabsParamList } from '../types/navigation';
 
-// AppHeader Component
-interface AppHeaderProps {
-  vehicleName: string;
-  onThemeToggle?: () => void;
-}
-
-const AppHeader: React.FC<AppHeaderProps> = ({
-  vehicleName,
-  onThemeToggle,
-}) => {
+// ─── AppHeader ────────────────────────────────────────────────────────────────
+const AppHeader: React.FC = () => {
   const { colors, toggleTheme, theme } = useTheme();
   const isDark = theme === 'dark';
-
-  const handleThemeToggle = () => {
-    toggleTheme();
-    onThemeToggle?.();
-  };
 
   return (
     <View
       style={[
-        styles.header,
+        S.header,
         {
           backgroundColor: colors.cardBackground,
           borderBottomColor: colors.border,
         },
       ]}
     >
-      <View style={styles.headerContent}>
-        {/* Left: Vehicle Info */}
-        <View style={styles.vehicleInfo}>
-          <Text style={[styles.vehicleName, { color: colors.text }]}>
-            {vehicleName}
-          </Text>
-          <Text
-            style={[styles.connectionStatus, { color: colors.textSecondary }]}
-          >
-            ● Connected
-          </Text>
-        </View>
+      {/* Left: Wordmark */}
+      <View style={S.headerLeft}>
+        <Text style={S.wordmark}>
+          <Text style={{ color: '#F97316' }}>Fuel</Text>
+          <Text style={{ color: colors.text }}>Flow</Text>
+        </Text>
+      </View>
 
-        {/* Right: Theme Toggle Button */}
-        <TouchableOpacity
-          onPress={handleThemeToggle}
+      {/* Right: Theme Toggle */}
+      <TouchableOpacity
+        onPress={toggleTheme}
+        style={[
+          S.themeToggle,
+          { backgroundColor: isDark ? '#2C2C2E' : '#E5E5EA' },
+        ]}
+        activeOpacity={0.7}
+      >
+        <View
           style={[
-            styles.themeToggle,
+            S.thumb,
             {
-              backgroundColor: colors.border,
+              backgroundColor: colors.cardBackground,
+              transform: [{ translateX: isDark ? 26 : 2 }],
             },
           ]}
-          activeOpacity={0.7}
         >
-          <View
-            style={[
-              styles.toggleThumb,
-              {
-                backgroundColor: colors.cardBackground,
-                transform: [{ translateX: isDark ? 20 : 0 }],
-              },
-            ]}
-          >
-            {isDark ? (
-              <Icon name="moon" size={14} color={colors.textSecondary} />
-            ) : (
-              <Icon name="sun" size={14} color={colors.warning} />
-            )}
-          </View>
-        </TouchableOpacity>
-      </View>
+          <MCI
+            name={isDark ? 'weather-night' : 'white-balance-sunny'}
+            size={14}
+            color={isDark ? '#A78BFA' : '#F59E0B'}
+          />
+        </View>
+      </TouchableOpacity>
     </View>
   );
 };
 
 export { AppHeader };
 
+// ─── Navigators ──────────────────────────────────────────────────────────────
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 const Tab = createBottomTabNavigator<AppTabsParamList>();
 
-const AuthStack = () => {
-  const { colors } = useTheme();
+const AuthStack = () => (
+  <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Screen name="Login" component={LoginScreen} />
+  </Stack.Navigator>
+);
 
-  return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-      }}
-    >
-      <Stack.Screen
-        name="Login"
-        component={LoginScreen}
-        options={{}}
-      />
-    </Stack.Navigator>
-  );
+type TabIconProps = { color: string; focused: boolean; size: number };
+
+const TAB_ICONS: Record<string, { active: string; inactive: string }> = {
+  DashboardTab: { active: 'gauge', inactive: 'gauge' },
+  DiagnosticsTab: { active: 'wrench', inactive: 'wrench-outline' },
+  RemindersTab: { active: 'bell', inactive: 'bell-outline' },
+  SettingsTab: { active: 'cog', inactive: 'cog-outline' },
 };
 
 const AppTabs = () => {
-  const { colors, toggleTheme } = useTheme();
+  const { colors } = useTheme();
   const { t } = useLocalization();
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 8);
 
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
+        tabBarIcon: ({ color, focused }: TabIconProps) => {
+          const map = TAB_ICONS[route.name];
+          const iconName = focused ? map?.active : map?.inactive;
+          return (
+            <MCI
+              name={iconName ?? 'circle-outline'}
+              size={22}
+              color={color}
+            />
+          );
+        },
         tabBarStyle: {
           backgroundColor: colors.cardBackground,
           borderTopColor: colors.border,
-          borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
-          marginBottom: 20,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: 56 + bottomPad,
+          paddingBottom: bottomPad,
+          paddingTop: 6,
+          elevation: 0,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -1 },
+          shadowOpacity: 0.06,
+          shadowRadius: 4,
         },
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: '#F97316',
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
-          marginTop: 4,
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 1,
         },
-      }}
+        tabBarItemStyle: { paddingTop: 2 },
+      })}
     >
       <Tab.Screen
         name="DashboardTab"
         component={DashboardScreen}
-        options={{
-          title: t('nav_dashboard'),
-          tabBarIcon: ({ color }) => (
-            <Icon name="gauge" size={24} color={color} />
-          ),
-        }}
+        options={{ title: t('nav_dashboard') }}
       />
       <Tab.Screen
         name="DiagnosticsTab"
         component={DiagnosticsScreen}
-        options={{
-          title: t('nav_diagnostics'),
-          tabBarIcon: ({ color }) => (
-            <Icon name="wrench" size={24} color={color} />
-          ),
-        }}
+        options={{ title: t('nav_diagnostics') }}
       />
       <Tab.Screen
         name="RemindersTab"
         component={RemindersScreen}
-        options={{
-          title: t('nav_reminders'),
-          tabBarIcon: ({ color }) => (
-            <Icon name="calendar-clock" size={24} color={color} />
-          ),
-        }}
+        options={{ title: t('nav_reminders') }}
       />
       <Tab.Screen
         name="SettingsTab"
         component={SettingsScreen}
-        options={{
-          title: t('nav_settings'),
-          tabBarIcon: ({ color }) => (
-            <Icon name="settings" size={24} color={color} />
-          ),
-        }}
+        options={{ title: t('nav_settings') }}
       />
     </Tab.Navigator>
   );
 };
 
 export const RootNavigator: React.FC = () => {
-  const { colors } = useTheme();
   const { isLoggedIn } = useAuth();
 
   return (
     <NavigationContainer>
-      {isLoggedIn ? (
-        <AppTabs />
-      ) : (
-        <AuthStack />
-      )}
+      {isLoggedIn ? <AppTabs /> : <AuthStack />}
     </NavigationContainer>
   );
 };
 
-const styles = StyleSheet.create({
+// ─── Styles ──────────────────────────────────────────────────────────────────
+const S = StyleSheet.create({
   header: {
-    paddingTop: 32,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-    marginBottom: 16,
-  },
-  headerContent: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    paddingTop: Platform.OS === 'android' ? 48 : 16,
+    paddingBottom: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  vehicleInfo: {
-    flex: 1,
-  },
-  vehicleName: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  connectionStatus: {
-    fontSize: 10,
-    fontFamily: 'Courier New',
-    fontWeight: '500',
-  },
+  headerLeft: {},
+  wordmark: { fontSize: 22, fontWeight: '800', letterSpacing: -0.3 },
+
+  // Theme toggle — pill with sliding thumb
   themeToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: 56,
-    height: 32,
-    borderRadius: 16,
-    paddingHorizontal: 4,
-    position: 'relative',
+    width: 54,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  toggleThumb: {
+  thumb: {
+    position: 'absolute',
     width: 24,
     height: 24,
     borderRadius: 12,
-    justifyContent: 'center',
     alignItems: 'center',
-    position: 'absolute',
+    justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
     shadowRadius: 3,
     elevation: 3,
-  },
-  themeIcon: {
-    fontSize: 14,
-  },
-  themeIconLeft: {
-    position: 'absolute',
-    left: 6,
-    fontSize: 12,
-  },
-  themeIconRight: {
-    position: 'absolute',
-    right: 6,
-    fontSize: 12,
   },
 });

@@ -4,27 +4,49 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   StatusBar,
   TextInput,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
-import auth from '@react-native-firebase/auth';
+import MCI from 'react-native-vector-icons/MaterialCommunityIcons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
+import { getApp } from '@react-native-firebase/app';
+import {
+  GoogleAuthProvider,
+  createUserWithEmailAndPassword,
+  getAuth,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+} from '@react-native-firebase/auth';
 import { useTheme } from '../context/ThemeContext';
-
-// --- Inline Google SVG Logo (no external dependency needed) ---
-import Svg, { Path, G, ClipPath, Rect, Defs } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 
 const GoogleLogo = () => (
-  <Svg width="20" height="20" viewBox="0 0 48 48">
-    <Path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
-    <Path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
-    <Path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
-    <Path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+  <Svg width="18" height="18" viewBox="0 0 48 48">
+    <Path
+      fill="#FFC107"
+      d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
+    />
+    <Path
+      fill="#FF3D00"
+      d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"
+    />
+    <Path
+      fill="#4CAF50"
+      d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
+    />
+    <Path
+      fill="#1976D2"
+      d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
+    />
   </Svg>
 );
 
@@ -32,7 +54,8 @@ type Mode = 'login' | 'signup';
 
 const LoginScreen: React.FC = () => {
   const { colors } = useTheme();
-  const isDark = colors.background === '#000' || colors.background < '#888';
+  const isDark = colors.background === '#000000' || colors.background === '#000' || colors.background < '#888';
+  const firebaseAuth = getAuth(getApp());
 
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
@@ -41,12 +64,12 @@ const LoginScreen: React.FC = () => {
 
   useEffect(() => {
     GoogleSignin.configure({
-      webClientId: '301509148498-885pdeqhul3ieat73urmcb9tssrevmll.apps.googleusercontent.com',
+      webClientId:
+        '301509148498-885pdeqhul3ieat73urmcb9tssrevmll.apps.googleusercontent.com',
       offlineAccess: true,
     });
   }, []);
 
-  // --- Google ---
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
@@ -54,8 +77,8 @@ const LoginScreen: React.FC = () => {
       const response = await GoogleSignin.signIn();
       const idToken = response.data?.idToken;
       if (!idToken) throw new Error('ID токен олдсонгүй');
-      const credential = auth.GoogleAuthProvider.credential(idToken);
-      await auth().signInWithCredential(credential);
+      const credential = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(firebaseAuth, credential);
     } catch (error: any) {
       if (
         error.code === statusCodes.SIGN_IN_CANCELLED ||
@@ -68,7 +91,6 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  // --- Email ---
   const handleEmailAuth = async () => {
     if (!email || !password) {
       Alert.alert('Анхааруулга', 'Имэйл болон нууц үгээ оруулна уу.');
@@ -77,9 +99,9 @@ const LoginScreen: React.FC = () => {
     try {
       setLoading(true);
       if (mode === 'login') {
-        await auth().signInWithEmailAndPassword(email, password);
+        await signInWithEmailAndPassword(firebaseAuth, email, password);
       } else {
-        await auth().createUserWithEmailAndPassword(email, password);
+        await createUserWithEmailAndPassword(firebaseAuth, email, password);
       }
     } catch (error: any) {
       const msg =
@@ -98,41 +120,57 @@ const LoginScreen: React.FC = () => {
     }
   };
 
-  const CARD = isDark ? '#1A1A1A' : '#F5F5F5';
-  const BORDER = isDark ? '#2A2A2A' : '#E5E5E5';
-  const PLACEHOLDER = isDark ? '#555' : '#AAA';
+  const BG = colors.background;
+  const CARD = isDark ? '#1C1C1E' : '#F2F2F7';
+  const BORDER = isDark ? '#2C2C2E' : '#E5E5EA';
+  const PLACEHOLDER = isDark ? '#636366' : '#AEAEB2';
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-
+    <SafeAreaView style={[S.safe, { backgroundColor: BG }]}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={BG}
+      />
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={S.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.container}>
-
+        <ScrollView
+          style={S.flex}
+          contentContainerStyle={S.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {/* ── Hero ── */}
-          <View style={styles.hero}>
-            <View style={styles.iconWrap}>
-              <Text style={styles.iconEmoji}>⛽</Text>
+          <View style={S.hero}>
+            <View style={S.iconCircle}>
+              <MCI name="gauge" size={48} color="#fff" />
             </View>
-            <Text style={[styles.appName, { color: colors.text }]}>FuelFlow</Text>
-            <Text style={[styles.appSub, { color: colors.text }]}>
+            <Text style={S.brandRow}>
+              <Text style={S.brandOrange}>Fuel</Text>
+              <Text style={[S.brandWhite, { color: colors.text }]}>Flow</Text>
+            </Text>
+            <Text style={[S.tagline, { color: PLACEHOLDER }]}>
               Түлшний зарцуулалтаа ухаалгаар хянаарай
             </Text>
           </View>
 
-          {/* ── Tab toggle ── */}
-          <View style={[styles.tabRow, { backgroundColor: CARD }]}>
-            {(['login', 'signup'] as Mode[]).map((m) => (
+          {/* ── Mode selector ── */}
+          <View style={[S.segmentRow, { backgroundColor: CARD }]}>
+            {(['login', 'signup'] as Mode[]).map(m => (
               <TouchableOpacity
                 key={m}
-                style={[styles.tab, mode === m && styles.tabActive]}
+                style={[S.segment, mode === m && S.segmentActive]}
                 onPress={() => setMode(m)}
-                activeOpacity={0.7}
+                activeOpacity={0.75}
               >
-                <Text style={[styles.tabText, { color: mode === m ? '#fff' : colors.text }, mode !== m && { opacity: 0.4 }]}>
+                <Text
+                  style={[
+                    S.segmentText,
+                    { color: mode === m ? '#fff' : PLACEHOLDER },
+                    mode === m && S.segmentTextActive,
+                  ]}
+                >
                   {m === 'login' ? 'Нэвтрэх' : 'Бүртгүүлэх'}
                 </Text>
               </TouchableOpacity>
@@ -140,64 +178,67 @@ const LoginScreen: React.FC = () => {
           </View>
 
           {/* ── Inputs ── */}
-          <View style={styles.inputs}>
-            <TextInput
-              style={[styles.input, { backgroundColor: CARD, borderColor: BORDER, color: colors.text }]}
-              placeholder="Имэйл хаяг"
-              placeholderTextColor={PLACEHOLDER}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TextInput
-              style={[styles.input, { backgroundColor: CARD, borderColor: BORDER, color: colors.text }]}
-              placeholder="Нууц үг"
-              placeholderTextColor={PLACEHOLDER}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
+          <View style={S.inputs}>
+            <View style={[S.inputWrap, { backgroundColor: CARD, borderColor: BORDER }]}>
+              <TextInput
+                style={[S.input, { color: colors.text }]}
+                placeholder="Имэйл хаяг"
+                placeholderTextColor={PLACEHOLDER}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <View style={[S.inputWrap, { backgroundColor: CARD, borderColor: BORDER }]}>
+              <TextInput
+                style={[S.input, { color: colors.text }]}
+                placeholder="Нууц үг"
+                placeholderTextColor={PLACEHOLDER}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
           </View>
 
           {/* ── Primary button ── */}
           <TouchableOpacity
-            style={styles.primaryBtn}
+            style={[S.primaryBtn, loading && S.primaryBtnDisabled]}
             onPress={handleEmailAuth}
             activeOpacity={0.85}
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.primaryBtnText}>
+              <Text style={S.primaryBtnText}>
                 {mode === 'login' ? 'Нэвтрэх' : 'Бүртгүүлэх'}
               </Text>
             )}
           </TouchableOpacity>
 
           {/* ── Divider ── */}
-          <View style={styles.divider}>
-            <View style={[styles.divLine, { backgroundColor: BORDER }]} />
-            <Text style={[styles.divText, { color: colors.text }]}>эсвэл</Text>
-            <View style={[styles.divLine, { backgroundColor: BORDER }]} />
+          <View style={S.divider}>
+            <View style={[S.divLine, { backgroundColor: BORDER }]} />
+            <Text style={[S.divText, { color: PLACEHOLDER }]}>эсвэл</Text>
+            <View style={[S.divLine, { backgroundColor: BORDER }]} />
           </View>
 
           {/* ── Google button ── */}
           <TouchableOpacity
-            style={[styles.googleBtn, { backgroundColor: CARD, borderColor: BORDER }]}
+            style={[S.googleBtn, { backgroundColor: CARD, borderColor: BORDER }]}
             onPress={handleGoogleLogin}
             activeOpacity={0.85}
             disabled={loading}
           >
             <GoogleLogo />
-            <Text style={[styles.googleBtnText, { color: colors.text }]}>
+            <Text style={[S.googleBtnText, { color: colors.text }]}>
               Google-ээр нэвтрэх
             </Text>
           </TouchableOpacity>
-
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -205,63 +246,65 @@ const LoginScreen: React.FC = () => {
 
 const ORANGE = '#F97316';
 
-const styles = StyleSheet.create({
+const S = StyleSheet.create({
   safe: { flex: 1 },
-  container: {
-    flex: 1,
-    paddingHorizontal: 28,
-    paddingTop: 24,
-    paddingBottom: 36,
+  flex: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 48,
     gap: 16,
   },
 
   // Hero
-  hero: { alignItems: 'center', marginBottom: 8, gap: 8 },
-  iconWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 20,
+  hero: { alignItems: 'center', marginBottom: 12, gap: 12 },
+  iconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     backgroundColor: ORANGE,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: ORANGE,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 10,
-    marginBottom: 4,
+    shadowRadius: 20,
+    elevation: 12,
   },
-  iconEmoji: { fontSize: 34 },
-  appName: { fontSize: 34, fontWeight: '800', letterSpacing: -1 },
-  appSub: { fontSize: 14, opacity: 0.4, textAlign: 'center', lineHeight: 20 },
+  brandRow: { fontSize: 36, fontWeight: '800', letterSpacing: -0.5 },
+  brandOrange: { color: ORANGE, fontSize: 36, fontWeight: '800' },
+  brandWhite: { fontSize: 36, fontWeight: '800' },
+  tagline: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
 
-  // Tabs
-  tabRow: {
+  // Segment
+  segmentRow: {
     flexDirection: 'row',
     borderRadius: 14,
     padding: 4,
   },
-  tab: {
+  segment: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderRadius: 11,
     alignItems: 'center',
   },
-  tabActive: { backgroundColor: ORANGE },
-  tabText: { fontWeight: '700', fontSize: 14 },
+  segmentActive: { backgroundColor: ORANGE },
+  segmentText: { fontWeight: '600', fontSize: 14 },
+  segmentTextActive: { color: '#fff' },
 
   // Inputs
   inputs: { gap: 10 },
-  input: {
-    height: 52,
+  inputWrap: {
     borderRadius: 14,
     borderWidth: 1,
+    height: 52,
+    justifyContent: 'center',
     paddingHorizontal: 16,
-    fontSize: 15,
   },
+  input: { fontSize: 15, padding: 0 },
 
-  // Primary btn
+  // Primary button
   primaryBtn: {
     height: 52,
     borderRadius: 14,
@@ -270,18 +313,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: ORANGE,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
     elevation: 8,
   },
+  primaryBtnDisabled: { opacity: 0.7 },
   primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
   // Divider
   divider: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   divLine: { flex: 1, height: 1 },
-  divText: { fontSize: 13, opacity: 0.35, fontWeight: '500' },
+  divText: { fontSize: 13, fontWeight: '500' },
 
-  // Google btn
+  // Google
   googleBtn: {
     height: 52,
     borderRadius: 14,
