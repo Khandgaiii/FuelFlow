@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   StyleSheet,
   ScrollView,
   Text,
   TouchableOpacity,
-  ActivityIndicator,
   Animated,
 } from 'react-native';
 import { getApp } from '@react-native-firebase/app';
@@ -23,8 +23,8 @@ import { useLocalization } from '../context/LocalizationContext';
 import { useMetricUnits } from '../context/MetricUnitsContext';
 import { useAuth } from '../context/AuthContext';
 import { useTelemetry } from '../context/TelemetryContext';
+import { bleService } from '../services/BleService';
 import { RadialGauge } from '../components/RadialGauge';
-import { VehicleStatus } from '../components/VehicleStatus';
 import { AppHeader } from '../navigation/RootNavigator';
 import { MAX_RPM, MAX_THROTTLE } from '../constants/telemetry';
 
@@ -43,6 +43,17 @@ const EMPTY_TELEMETRY = {
 const ORANGE = '#F97316';
 const TEAL = '#14B8A6';
 
+function formatDurationSec(sec: number): string {
+  if (sec <= 0) return '—';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
   navigation: _navigation,
 }) => {
@@ -55,7 +66,6 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
   const ble = useTelemetry();
 
   const [isFetching, setIsFetching] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Spin animation for refresh icon
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -107,7 +117,6 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
       console.error('[FuelFlow] Fetch error:', error);
     } finally {
       setIsFetching(false);
-      setIsInitialLoad(false);
     }
   }, [db, spinRefresh, user?.uid]);
 
@@ -115,40 +124,13 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
     ensureAndFetchTelemetry();
   }, [ensureAndFetchTelemetry]);
 
-  const MAX_AVG_SAMPLES = 180;
-  const sessionSamples = useRef<{ s: number; r: number; f: number }[]>([]);
-  const [sessionAvg, setSessionAvg] = useState({
-    speed: 0,
-    rpm: 0,
-    fuel: 0,
-    n: 0,
-  });
-
-  useEffect(() => {
-    if (!ble.isConnected) {
-      sessionSamples.current = [];
-      setSessionAvg({ speed: 0, rpm: 0, fuel: 0, n: 0 });
-      return;
-    }
-    const d = ble.telemetry;
-    sessionSamples.current.push({
-      s: d.speed,
-      r: d.rpm,
-      f: d.fuelConsumption,
-    });
-    if (sessionSamples.current.length > MAX_AVG_SAMPLES) {
-      sessionSamples.current.shift();
-    }
-    const arr = sessionSamples.current;
-    const n = arr.length;
-    if (n === 0) return;
-    setSessionAvg({
-      speed: arr.reduce((a, b) => a + b.s, 0) / n,
-      rpm: arr.reduce((a, b) => a + b.r, 0) / n,
-      fuel: arr.reduce((a, b) => a + b.f, 0) / n,
-      n,
-    });
-  }, [ble.isConnected, ble.telemetry]);
+  useFocusEffect(
+    useCallback(() => {
+      if (ble.isConnected) {
+        void ble.refreshAllEsp();
+      }
+    }, [ble.isConnected, ble.refreshAllEsp]),
+  );
 
   const speedUnit = metricUnits ? 'km/h' : 'mph';
   const maxSpeed = metricUnits ? 240 : 150;
@@ -163,9 +145,11 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
   const displayFuel = hasEsp
     ? metricUnits
       ? tel.fuelConsumption
-      : tel.fuelConsumption > 0
-        ? Math.round(235.215 / tel.fuelConsumption)
-        : 0
+      : tel.mpg != null && tel.mpg > 0
+        ? Math.round(tel.mpg * 10) / 10
+        : tel.fuelConsumption > 0
+          ? Math.round(235.215 / tel.fuelConsumption)
+          : 0
     : null;
 
   const noData = !hasEsp;
@@ -188,32 +172,78 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
       ? '0%'
       : `${Math.min((tel.throttlePosition / MAX_THROTTLE) * 100, 100)}%`) as `${number}%`,
   };
-  const statusCardStyle = styles.statusCard;
 
-  const batteryStatus = (v: number) =>
-    v === 0 ? 'good' : v >= 12.4 ? 'good' : v >= 12.0 ? 'warning' : 'critical';
-  const coolantStatus = (v: number) =>
-    v === 0 ? 'good' : v <= 95 ? 'good' : v <= 105 ? 'warning' : 'critical';
-  const oilStatus = (v: number) =>
-    v === 0 ? 'good' : v >= 25 ? 'good' : v >= 15 ? 'warning' : 'critical';
-  const engineStatus = (v: number) =>
-    v === 0 ? 'good' : v <= 75 ? 'good' : v <= 90 ? 'warning' : 'critical';
+  const trip = ble.espTripStats;
+  const bc = ble.espTripBroadcast;
+  const hist = ble.espHistTrips;
 
-  if (isInitialLoad) {
-    return (
-      <View
-        style={[
-          styles.loadingContainer,
-          { backgroundColor: colors.background },
-        ]}
-      >
-        <ActivityIndicator size="large" color={ORANGE} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          {t('loading_telemetry')}
-        </Text>
-      </View>
-    );
-  }
+  const liveJsonRaw = hasEsp ? bleService.getLastLiveJsonRaw() : null;
+
+  type LiveDetailGroup = { title: string; rows: [string, string][] };
+
+  const liveDetailGroups = useMemo((): LiveDetailGroup[] => {
+    if (!hasEsp) {
+      return [
+        {
+          title: t('dash_group_fuel_economy'),
+          rows: [
+            [t('fuel_rate_lph'), '—'],
+            [t('fuel_consumption_unit'), '—'],
+            [t('km_per_liter'), '—'],
+            [t('fuel_mpg_abbr'), '—'],
+            [t('efficiency_score'), '—'],
+          ],
+        },
+        {
+          title: t('dash_group_driving_events'),
+          rows: [
+            [t('hard_accel_events'), '—'],
+            [t('hard_brake_events'), '—'],
+          ],
+        },
+      ];
+    }
+    return [
+      {
+        title: t('dash_group_fuel_economy'),
+        rows: [
+          [
+            t('fuel_rate_lph'),
+            tel.lph != null ? `${tel.lph.toFixed(2)} L/h` : '—',
+          ],
+          [
+            t('fuel_consumption_unit'),
+            `${tel.fuelConsumption.toFixed(1)} L/100km`,
+          ],
+          [
+            t('km_per_liter'),
+            tel.kpl != null && tel.kpl > 0 ? tel.kpl.toFixed(2) : '—',
+          ],
+          [
+            t('fuel_mpg_abbr'),
+            tel.mpg != null && tel.mpg > 0 ? tel.mpg.toFixed(1) : '—',
+          ],
+          [
+            t('efficiency_score'),
+            tel.efficiencyScore != null ? String(tel.efficiencyScore) : '—',
+          ],
+        ],
+      },
+      {
+        title: t('dash_group_driving_events'),
+        rows: [
+          [
+            t('hard_accel_events'),
+            tel.hardAccel != null ? String(tel.hardAccel) : '—',
+          ],
+          [
+            t('hard_brake_events'),
+            tel.hardBrake != null ? String(tel.hardBrake) : '—',
+          ],
+        ],
+      },
+    ];
+  }, [hasEsp, tel, t]);
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.background }}>
@@ -256,16 +286,25 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* ── Gauges Card ── */}
+        {/* ── Live: gauges + fuel / throttle ── */}
         <View
           style={[
             styles.card,
+            styles.cardTightTop,
             {
               backgroundColor: colors.cardBackground,
               borderColor: colors.border,
             },
           ]}
         >
+          <Text style={[styles.cardHeadline, { color: colors.textSecondary }]}>
+            {t('dashboard_live_esp')}
+          </Text>
+          {!hasEsp ? (
+            <Text style={[styles.tripHint, { color: colors.textSecondary, marginBottom: 8 }]}>
+              {t('dashboard_connect_to_see_data')}
+            </Text>
+          ) : null}
           <View style={styles.gaugesRow}>
             <View style={styles.gaugeWrapper}>
               <RadialGauge
@@ -291,30 +330,105 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
               />
             </View>
           </View>
+
+          <View style={[styles.metricsRow, styles.metricsRowInCard]}>
+            <View
+              style={[
+                styles.metricCardHalf,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>
+                {t('fuel_consumption')}
+              </Text>
+              <Text style={[styles.metricBigValue, fuelValueColorStyle]}>
+                {noData || displayFuel === null ? '—' : displayFuel}
+              </Text>
+              <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
+                {fuelUnit}
+              </Text>
+              <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+                <View style={[styles.barFill, fuelFillStyle]} />
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.metricCardHalf,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>
+                {t('throttle_position')}
+              </Text>
+              <Text style={[styles.metricBigValue, throttleValueColorStyle]}>
+                {noData ? '—' : tel.throttlePosition}
+              </Text>
+              <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
+                %
+              </Text>
+              <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
+                <View style={[styles.barFill, throttleFillStyle]} />
+              </View>
+            </View>
+          </View>
         </View>
 
-        {ble.isConnected && sessionAvg.n > 0 && (
-          <View
-            style={[
-              styles.avgCard,
-              {
-                backgroundColor: colors.cardBackground,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.avgSectionTitle, { color: colors.textSecondary }]}>
-              {t('session_averages')} · n={sessionAvg.n}
+        <View
+          style={[
+            styles.tripCardHighlight,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: hasEsp ? ORANGE : colors.border,
+              opacity: hasEsp ? 1 : 0.95,
+            },
+          ]}
+        >
+            <Text style={[styles.tripBannerTitle, { color: hasEsp ? ORANGE : colors.textSecondary }]}>
+              {t('dashboard_trip_section')}
             </Text>
+            {!hasEsp ? (
+              <Text style={[styles.tripHint, { color: colors.textSecondary }]}>
+                {t('dashboard_connect_to_see_data')}
+              </Text>
+            ) : !trip ? (
+              <Text style={[styles.tripHint, { color: colors.textSecondary }]}>
+                {t('dashboard_trip_waiting')}
+              </Text>
+            ) : null}
             <View style={styles.avgRow}>
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('trip_distance_label')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {trip
+                    ? metricUnits
+                      ? trip.distanceKm.toFixed(2)
+                      : (trip.distanceKm * 0.621371).toFixed(2)
+                    : '—'}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
+                  {metricUnits ? 'km' : 'mi'}
+                </Text>
+              </View>
+              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
               <View style={styles.avgCol}>
                 <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
                   {t('avg_speed')}
                 </Text>
                 <Text style={[styles.avgValue, { color: colors.text }]}>
-                  {metricUnits
-                    ? sessionAvg.speed.toFixed(1)
-                    : Math.round(sessionAvg.speed * 0.621371)}
+                  {trip
+                    ? metricUnits
+                      ? trip.avgSpeedKmh.toFixed(0)
+                      : Math.round(trip.avgSpeedKmh * 0.621371).toString()
+                    : '—'}
                 </Text>
                 <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
                   {speedUnit}
@@ -323,158 +437,243 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
               <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
               <View style={styles.avgCol}>
                 <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
-                  {t('avg_rpm')}
-                </Text>
-                <Text style={[styles.avgValue, { color: colors.text }]}>
-                  {Math.round(sessionAvg.rpm)}
-                </Text>
-                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
-                  RPM
-                </Text>
-              </View>
-              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.avgCol}>
-                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
                   {t('avg_fuel')}
                 </Text>
                 <Text style={[styles.avgValue, { color: colors.text }]}>
-                  {metricUnits
-                    ? sessionAvg.fuel.toFixed(1)
-                    : sessionAvg.fuel > 0
-                      ? Math.round(235.215 / sessionAvg.fuel)
-                      : '—'}
+                  {trip
+                    ? metricUnits
+                      ? trip.l100.toFixed(1)
+                      : trip.mpg > 0.05
+                        ? trip.mpg.toFixed(1)
+                        : '—'
+                    : '—'}
                 </Text>
                 <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
                   {fuelUnit}
                 </Text>
               </View>
             </View>
-          </View>
-        )}
-
-        {/* ── Fuel + Throttle ── */}
-        <View style={styles.metricsRow}>
-          <View
-            style={[
-              styles.metricCardHalf,
-              {
-                backgroundColor: colors.cardBackground,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>
-              {t('fuel_consumption')}
-            </Text>
-            <Text style={[styles.metricBigValue, fuelValueColorStyle]}>
-              {noData || displayFuel === null ? '—' : displayFuel}
-            </Text>
-            <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
-              {fuelUnit}
-            </Text>
-            <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
-              <View style={[styles.barFill, fuelFillStyle]} />
+            <View style={[styles.avgRow, { marginTop: 12 }]}>
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('trip_duration_label')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {trip ? formatDurationSec(trip.durationSec) : '—'}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}> </Text>
+              </View>
+              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('trip_fuel_liters')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {trip ? trip.fuelLiters.toFixed(3) : '—'}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>L</Text>
+              </View>
+              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('efficiency_score')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {trip ? String(trip.score) : '—'}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
+                  ha {trip?.hardAccel ?? '—'} / hb {trip?.hardBrake ?? '—'}
+                </Text>
+              </View>
             </View>
+            {bc?.rtcTimeString ? (
+              <Text style={[styles.rtcHint, { color: colors.textSecondary }]}>
+                {t('device_rtc_time')}: {bc.rtcTimeString}
+              </Text>
+            ) : null}
           </View>
-
-          <View
-            style={[
-              styles.metricCardHalf,
-              {
-                backgroundColor: colors.cardBackground,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>
-              {t('throttle_position')}
-            </Text>
-            <Text style={[styles.metricBigValue, throttleValueColorStyle]}>
-              {noData ? '—' : tel.throttlePosition}
-            </Text>
-            <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
-              %
-            </Text>
-            <View style={[styles.barTrack, { backgroundColor: colors.border }]}>
-              <View style={[styles.barFill, throttleFillStyle]} />
-            </View>
-          </View>
-        </View>
-
-        {/* ── System Status ── */}
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-            {t('system_status')}
-          </Text>
-        </View>
 
         <View
           style={[
-            styles.card,
+            styles.avgCard,
             {
               backgroundColor: colors.cardBackground,
               borderColor: colors.border,
             },
-            statusCardStyle,
           ]}
         >
-          <VehicleStatus
-            items={[
-              {
-                icon: (
-                  <Icon
-                    name="zap"
-                    size={20}
-                    color={noData ? colors.textSecondary : colors.success}
-                  />
-                ),
-                label: t('battery'),
-                value: noData ? '— V' : `${Number(tel.battery).toFixed(1)}V`,
-                status: batteryStatus(tel.battery),
-                color: colors.success,
-              },
-              {
-                icon: (
-                  <Icon
-                    name="thermometer"
-                    size={20}
-                    color={noData ? colors.textSecondary : colors.success}
-                  />
-                ),
-                label: t('coolant'),
-                value: noData ? '— °C' : `${tel.coolant}°C`,
-                status: coolantStatus(tel.coolant),
-                color: colors.success,
-              },
-              {
-                icon: (
-                  <Icon
-                    name="droplets"
-                    size={20}
-                    color={noData ? colors.textSecondary : colors.success}
-                  />
-                ),
-                label: t('oil_pressure'),
-                value: noData ? '— PSI' : `${tel.oilPressure} PSI`,
-                status: oilStatus(tel.oilPressure),
-                color: colors.success,
-              },
-              {
-                icon: (
-                  <Icon
-                    name="power"
-                    size={20}
-                    color={noData ? colors.textSecondary : colors.success}
-                  />
-                ),
-                label: t('engine_load'),
-                value: noData ? '— %' : `${tel.engineLoad}%`,
-                status: engineStatus(tel.engineLoad),
-                color: colors.success,
-              },
-            ]}
-            colors={colors}
-          />
+            <Text style={[styles.avgSectionTitle, { color: colors.text }]}>
+              {t('dashboard_instant_economy')}
+            </Text>
+            {liveDetailGroups.map((group, gi) => (
+              <View
+                key={group.title}
+                style={[styles.metricGroup, gi > 0 && styles.metricGroupSpaced]}
+              >
+                <Text style={[styles.groupTitle, { color: colors.textSecondary }]}>
+                  {group.title}
+                </Text>
+                {group.rows.map(([label, val], idx) => (
+                  <View
+                    key={`${group.title}-${label}-${idx}`}
+                    style={styles.infoRow}
+                  >
+                    <Text
+                      style={[styles.infoRowLabel, { color: colors.textSecondary }]}
+                      numberOfLines={2}
+                    >
+                      {label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.infoRowValue,
+                        { color: hasEsp ? colors.text : colors.textSecondary },
+                      ]}
+                      selectable={hasEsp}
+                    >
+                      {val}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+
+        <View
+          style={[
+            styles.avgCard,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+            <Text style={[styles.avgSectionTitle, { color: colors.text }]}>
+              {t('dashboard_period_totals')}
+            </Text>
+            {bc && hasEsp
+              ? (['day', 'week', 'month'] as const).map(period => {
+                  const a = bc[period];
+                  const label =
+                    period === 'day'
+                      ? t('agg_today')
+                      : period === 'week'
+                        ? t('agg_this_week')
+                        : t('agg_this_month');
+                  return (
+                    <View key={period} style={styles.aggBlock}>
+                      <Text style={[styles.aggTitle, { color: colors.text }]}>
+                        {label}
+                      </Text>
+                      <Text style={[styles.aggLine, { color: colors.textSecondary }]}>
+                        {(metricUnits
+                          ? a.distanceKm.toFixed(1)
+                          : (a.distanceKm * 0.621371).toFixed(1))}{' '}
+                        {metricUnits ? 'km' : 'mi'} · {a.fuelLiters.toFixed(2)} L ·{' '}
+                        {formatDurationSec(a.durationSec)} · {t('avg_speed')}{' '}
+                        {(metricUnits
+                          ? a.avgSpeed.toFixed(0)
+                          : Math.round(a.avgSpeed * 0.621371))}{' '}
+                        {speedUnit}
+                      </Text>
+                      <Text style={[styles.aggLine, { color: colors.textSecondary }]}>
+                        {metricUnits
+                          ? `${a.l100.toFixed(1)} L/100km`
+                          : `${a.mpg.toFixed(1)} mpg`}{' '}
+                        · {t('km_per_liter')} {a.kpl.toFixed(2)} ·{' '}
+                        {t('efficiency_score')} {a.score.toFixed(0)} · {t('trip_count_n')}{' '}
+                        {a.tripCount}
+                      </Text>
+                    </View>
+                  );
+                })
+              : (['day', 'week', 'month'] as const).map(period => {
+                  const label =
+                    period === 'day'
+                      ? t('agg_today')
+                      : period === 'week'
+                        ? t('agg_this_week')
+                        : t('agg_this_month');
+                  return (
+                    <View key={period} style={styles.aggBlock}>
+                      <Text style={[styles.aggTitle, { color: colors.text }]}>
+                        {label}
+                      </Text>
+                      <Text style={[styles.aggLine, { color: colors.textSecondary }]}>
+                        — · — · — · — · —
+                      </Text>
+                      <Text style={[styles.aggLine, { color: colors.textSecondary }]}>
+                        — · — · — · {t('trip_count_n')} —
+                      </Text>
+                    </View>
+                  );
+                })}
+          </View>
+
+        <View
+          style={[
+            styles.avgCard,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+            <Text style={[styles.avgSectionTitle, { color: colors.text }]}>
+              {t('hist_recent_sd')}
+            </Text>
+            {!hasEsp || hist.length === 0 ? (
+              <Text style={[styles.histLine, { color: colors.textSecondary }]}>
+                {t('hist_empty_placeholder')}
+              </Text>
+            ) : (
+              hist
+                .slice(-5)
+                .reverse()
+                .map((row, idx) => (
+                  <Text
+                    key={`${row.ts}-${idx}`}
+                    style={[styles.histLine, { color: colors.textSecondary }]}
+                  >
+                    {row.ts ? new Date(row.ts * 1000).toLocaleString() : '—'} ·{' '}
+                    {(metricUnits
+                      ? row.distanceKm.toFixed(1)
+                      : (row.distanceKm * 0.621371).toFixed(1))}{' '}
+                    {metricUnits ? 'km' : 'mi'} ·{' '}
+                    {metricUnits
+                      ? `${row.l100.toFixed(1)} L/100km`
+                      : `${row.mpg.toFixed(1)} mpg`}{' '}
+                    · {t('efficiency_score')} {row.score}
+                  </Text>
+                ))
+            )}
+          </View>
+
+        <View
+          style={[
+            styles.card,
+            styles.cardRawJson,
+            {
+              backgroundColor: colors.cardBackground,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.rawJsonLabel, { color: colors.textSecondary }]}>
+            {t('esp_ble_payload')}
+          </Text>
+          {liveJsonRaw ? (
+            <Text
+              selectable
+              style={[styles.rawJson, { color: colors.textSecondary }]}
+            >
+              {liveJsonRaw}
+            </Text>
+          ) : (
+            <Text style={[styles.rawJson, { color: colors.textSecondary }]}>
+              {t('esp_ble_payload_empty')}
+            </Text>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -484,14 +683,6 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingBottom: 48 },
-
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  loadingText: { fontSize: 13, fontWeight: '500' },
 
   noSignalBanner: {
     flexDirection: 'row',
@@ -518,6 +709,39 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  tripCardHighlight: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    borderLeftWidth: 5,
+    borderLeftColor: ORANGE,
+  },
+  tripBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  tripHint: { fontSize: 11, marginBottom: 8 },
+  rawJsonLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  rawJson: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: 'Courier New',
+  },
+  aggBlock: { marginBottom: 12, gap: 4 },
+  aggTitle: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  aggLine: { fontSize: 11, lineHeight: 16 },
+  histLine: { fontSize: 11, lineHeight: 18, marginBottom: 6 },
+  rtcHint: { fontSize: 10, marginTop: 10 },
 
   iconBtn: {
     width: 34,
@@ -558,8 +782,48 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 4,
   },
-  statusCard: { padding: 0, overflow: 'hidden' },
-
+  cardTightTop: { marginTop: 8 },
+  cardHeadline: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.9,
+    marginBottom: 10,
+  },
+  cardRawJson: {
+    marginTop: 6,
+    marginBottom: 20,
+  },
+  metricsRowInCard: {
+    marginTop: 16,
+    marginHorizontal: 0,
+    marginBottom: 0,
+  },
+  metricGroup: { marginBottom: 2 },
+  metricGroupSpaced: { marginTop: 14 },
+  groupTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.65,
+    marginBottom: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(128,128,128,0.18)',
+  },
+  infoRowLabel: { flex: 1, fontSize: 12, fontWeight: '600' },
+  infoRowValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'Courier New',
+    textAlign: 'right',
+    flexShrink: 0,
+    maxWidth: '56%',
+  },
   gaugesRow: {
     flexDirection: 'row',
     alignItems: 'center',

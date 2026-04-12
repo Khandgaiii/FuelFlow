@@ -7,6 +7,7 @@ export type IconName =
   | 'chevron-right'
   | 'circle-alert'
   | 'circle-check'
+  | 'download'
   | 'droplets'
   | 'gauge'
   | 'info'
@@ -32,6 +33,7 @@ const MCI_MAP: Record<IconName, string> = {
   'chevron-right': 'chevron-right',
   'circle-alert': 'alert-circle-outline',
   'circle-check': 'check-circle-outline',
+  download: 'download',
   droplets: 'water-outline',
   gauge: 'gauge',
   info: 'information-outline',

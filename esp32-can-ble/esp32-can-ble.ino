@@ -556,11 +556,12 @@ void loop() {
   // ── BLE live notify ────────────────────────────────────────────────────
   if (now - lastLive >= NOTIFY_LIVE_MS) {
     lastLive = now;
-    char json[220];
+    // dtcs: populate from CAN/OBD when implemented; keep array for app parsing
+    char json[256];
     snprintf(json, sizeof(json),
       "{\"spd\":%.0f,\"rpm\":%.0f,\"fuel\":%.1f,\"thr\":%.0f,"
       "\"bat\":0,\"cool\":%.0f,\"oil\":0,\"eng\":0,"
-      "\"iat\":%.0f,\"run\":%d,\"lph\":%.2f}",
+      "\"iat\":%.0f,\"run\":%d,\"lph\":%.2f,\"dtcs\":[]}",
       spd, rpm, g_fuel, tps, ect, iat, run?1:0, g_lph);
     pLive->setValue((uint8_t*)json, strlen(json));
     if (bleConnected) pLive->notify();

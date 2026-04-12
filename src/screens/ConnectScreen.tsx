@@ -1,114 +1,51 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   StyleSheet,
   ScrollView,
   Text,
-  TextInput,
   TouchableOpacity,
   ActivityIndicator,
   FlatList,
-  Share,
   Alert,
   Platform,
 } from 'react-native';
 import MCI from 'react-native-vector-icons/MaterialCommunityIcons';
-import { getApp } from '@react-native-firebase/app';
-import { doc, getDoc, getFirestore } from '@react-native-firebase/firestore';
 import { ConnectTabScreenProps } from '../types/navigation';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { useAuth } from '../context/AuthContext';
 import { useTelemetry } from '../context/TelemetryContext';
 import { AppHeader } from '../navigation/RootNavigator';
 import { DEVICE_NAME } from '../services/BleService';
+import { alertSavedPath } from '../utils/saveJsonFile';
 
 const ORANGE = '#F97316';
 
 const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
   const { colors } = useTheme();
   const { t } = useLocalization();
-  const { user } = useAuth();
-  const db = getFirestore(getApp());
   const ble = useTelemetry();
 
-  const [search, setSearch] = useState('');
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return ble.discoveredDevices;
-    return ble.discoveredDevices.filter(
-      d =>
-        d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q),
-    );
-  }, [ble.discoveredDevices, search]);
-
-  const shareJson = useCallback(
-    async (label: string, payload: object) => {
-      const body = JSON.stringify(payload, null, 2);
+  const runDownload = useCallback(
+    async (kind: 'live' | 'trip' | 'hist', key: string) => {
+      if (!ble.isConnected) {
+        Alert.alert(t('connect_export'), t('connect_download_need_ble'));
+        return;
+      }
+      setExporting(key);
       try {
-        await Share.share({
-          title: `FuelFlow — ${label}`,
-          message: body,
-        });
-      } catch (e) {
-        Alert.alert(t('connect_export'), String(e));
+        const res = await ble.downloadBleJson(kind);
+        if (res?.path) {
+          alertSavedPath(res.path, t);
+        }
+      } finally {
+        setExporting(null);
       }
     },
-    [t],
+    [ble, t],
   );
-
-  const exportTelemetryJson = useCallback(async () => {
-    setExporting('tel');
-    try {
-      await shareJson('telemetry', {
-        exportedAt: new Date().toISOString(),
-        source: ble.isConnected ? 'ble_live' : 'last_known',
-        telemetry: ble.telemetry,
-      });
-    } finally {
-      setExporting(null);
-    }
-  }, [ble.isConnected, ble.telemetry, shareJson]);
-
-  const exportDiagnosticsJson = useCallback(async () => {
-    if (!user?.uid) return;
-    setExporting('diag');
-    try {
-      const ref = doc(db, 'users', user.uid, 'diagnostics', 'latest');
-      const snap = await getDoc(ref);
-      const data = snap.exists() ? snap.data() : {};
-      await shareJson('diagnostics', {
-        exportedAt: new Date().toISOString(),
-        diagnostics: data,
-      });
-    } catch (e) {
-      Alert.alert(t('connect_export'), String(e));
-    } finally {
-      setExporting(null);
-    }
-  }, [db, shareJson, user?.uid]);
-
-  const exportCombinedJson = useCallback(async () => {
-    if (!user?.uid) return;
-    setExporting('all');
-    try {
-      const ref = doc(db, 'users', user.uid, 'diagnostics', 'latest');
-      const snap = await getDoc(ref);
-      const diag = snap.exists() ? snap.data() : {};
-      await shareJson('combined', {
-        exportedAt: new Date().toISOString(),
-        bleConnected: ble.isConnected,
-        telemetry: ble.telemetry,
-        diagnostics: diag,
-      });
-    } catch (e) {
-      Alert.alert(t('connect_export'), String(e));
-    } finally {
-      setExporting(null);
-    }
-  }, [db, ble.isConnected, ble.telemetry, shareJson, user?.uid]);
 
   const onConnectRow = async (deviceId: string) => {
     try {
@@ -127,56 +64,20 @@ const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[S.section, { color: colors.textSecondary }]}>
-          {t('connect_search')}
-        </Text>
-        <TextInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder={t('connect_search_ph')}
-          placeholderTextColor={colors.textSecondary}
-          style={[
-            S.input,
-            {
-              backgroundColor: colors.cardBackground,
-              borderColor: colors.border,
-              color: colors.text,
-            },
-          ]}
-        />
-
-        <Text style={[S.section, { color: colors.textSecondary }]}>
+        <Text style={[S.section, { color: colors.textSecondary, marginTop: 12 }]}>
           {t('connect_scan')}
         </Text>
-        <View style={S.rowBtns}>
-          <TouchableOpacity
-            style={[S.primaryBtn, { backgroundColor: ORANGE }]}
-            onPress={() => ble.scanForDevices()}
-            disabled={ble.isDiscovering}
-          >
-            {ble.isDiscovering ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={S.primaryBtnText}>{t('connect_scan_btn')}</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              S.secondaryBtn,
-              { borderColor: colors.border, backgroundColor: colors.cardBackground },
-            ]}
-            onPress={() => ble.connect()}
-            disabled={
-              ble.bleStatus === 'scanning' ||
-              ble.bleStatus === 'connecting' ||
-              ble.isConnected
-            }
-          >
-            <Text style={[S.secondaryBtnText, { color: colors.text }]}>
-              {t('connect_quick')} ({DEVICE_NAME})
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={[S.primaryBtn, { backgroundColor: ORANGE }]}
+          onPress={() => ble.scanForDevices()}
+          disabled={ble.isDiscovering}
+        >
+          {ble.isDiscovering ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={S.primaryBtnText}>{t('connect_scan_btn')}</Text>
+          )}
+        </TouchableOpacity>
 
         <Text style={[S.section, { color: colors.textSecondary }]}>
           {t('connect_devices')}
@@ -190,7 +91,7 @@ const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
             },
           ]}
         >
-          {filtered.length === 0 ? (
+          {ble.discoveredDevices.length === 0 ? (
             <Text style={[S.empty, { color: colors.textSecondary }]}>
               {ble.isDiscovering
                 ? t('connect_scanning')
@@ -199,13 +100,13 @@ const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
           ) : (
             <FlatList
               scrollEnabled={false}
-              data={filtered}
+              data={ble.discoveredDevices}
               keyExtractor={item => item.id}
               renderItem={({ item, index }) => (
                 <TouchableOpacity
                   style={[
                     S.deviceRow,
-                    index < filtered.length - 1 && {
+                    index < ble.discoveredDevices.length - 1 && {
                       borderBottomWidth: StyleSheet.hairlineWidth,
                       borderBottomColor: colors.border,
                     },
@@ -272,6 +173,11 @@ const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
               </TouchableOpacity>
             ) : null}
           </View>
+          {ble.isConnected && ble.espTripBroadcast?.rtcTimeString ? (
+            <Text style={[S.rtcLine, { color: colors.textSecondary }]}>
+              {t('device_rtc_time')}: {ble.espTripBroadcast.rtcTimeString}
+            </Text>
+          ) : null}
         </View>
 
         <Text style={[S.section, { color: colors.textSecondary }]}>
@@ -285,33 +191,31 @@ const ConnectScreen: React.FC<ConnectTabScreenProps> = () => {
         >
           <ExportRow
             icon="gauge"
-            label={t('connect_export_telemetry')}
-            onPress={exportTelemetryJson}
-            loading={exporting === 'tel'}
+            label={t('connect_download_live')}
+            onPress={() => runDownload('live', 'live')}
+            loading={exporting === 'live'}
             colors={colors}
           />
           <ExportRow
-            icon="car-wrench"
-            label={t('connect_export_diagnostics')}
-            onPress={exportDiagnosticsJson}
-            loading={exporting === 'diag'}
+            icon="map-marker-path"
+            label={t('connect_download_trip')}
+            onPress={() => runDownload('trip', 'trip')}
+            loading={exporting === 'trip'}
             colors={colors}
           />
           <ExportRow
-            icon="file-download-outline"
-            label={t('connect_export_combined')}
-            onPress={exportCombinedJson}
-            loading={exporting === 'all'}
+            icon="history"
+            label={t('connect_download_hist')}
+            onPress={() => runDownload('hist', 'hist')}
+            loading={exporting === 'hist'}
             colors={colors}
             isLast
           />
         </View>
 
-        {Platform.OS === 'android' ? (
-          <Text style={[S.hint, { color: colors.textSecondary }]}>
-            {t('connect_share_hint')}
-          </Text>
-        ) : null}
+        <Text style={[S.hint, { color: colors.textSecondary }]}>
+          {t('connect_files_hint')}
+        </Text>
 
         <View style={{ height: 32 }} />
       </ScrollView>
@@ -343,7 +247,7 @@ const ExportRow: React.FC<{
     {loading ? (
       <ActivityIndicator size="small" color={ORANGE} />
     ) : (
-      <MCI name="share-variant" size={18} color={colors.textSecondary} />
+      <MCI name="download" size={18} color={colors.textSecondary} />
     )}
   </TouchableOpacity>
 );
@@ -360,14 +264,6 @@ const S = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 4,
   },
-  input: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 10,
-    fontSize: 15,
-  },
-  rowBtns: { gap: 10 },
   primaryBtn: {
     borderRadius: 12,
     paddingVertical: 14,
@@ -376,13 +272,6 @@ const S = StyleSheet.create({
     minHeight: 48,
   },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  secondaryBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  secondaryBtnText: { fontWeight: '600', fontSize: 13 },
   card: {
     borderRadius: 14,
     borderWidth: 1,
@@ -407,6 +296,7 @@ const S = StyleSheet.create({
   },
   statusTitle: { fontSize: 16, fontWeight: '700' },
   statusSub: { fontSize: 12, marginTop: 4 },
+  rtcLine: { fontSize: 11, marginTop: 10, paddingHorizontal: 4, lineHeight: 16 },
   discBtn: {
     width: 40,
     height: 40,

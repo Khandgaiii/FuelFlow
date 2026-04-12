@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,159 +7,92 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Share,
   Alert,
   Platform,
 } from 'react-native';
-import { getApp } from '@react-native-firebase/app';
-import {
-  doc,
-  getDoc,
-  getFirestore,
-  serverTimestamp,
-  setDoc,
-} from '@react-native-firebase/firestore';
 import { Icon } from '../components/Icon';
 import { DiagnosticsTabScreenProps } from '../types/navigation';
 import { useTheme } from '../context/ThemeContext';
 import { useLocalization } from '../context/LocalizationContext';
-import { useAuth } from '../context/AuthContext';
 import { useTelemetry } from '../context/TelemetryContext';
 import { AppHeader } from '../navigation/RootNavigator';
-
-// --- Types ---
-interface FaultCode {
-  id: string;
-  code: string;
-  description: string;
-  severity: 'critical' | 'warning';
-  detectedAt: string;
-}
-
-interface DiagnosticsData {
-  faultCodes: FaultCode[];
-  protocol: string;
-  protocolSpeed: string;
-}
-
-const EMPTY_DIAGNOSTICS: DiagnosticsData = {
-  faultCodes: [],
-  protocol: 'OBD-II',
-  protocolSpeed: '—',
-};
+import { EspFaultCodeRow } from '../services/BleService';
+import {
+  saveFuelFlowJsonFile,
+  alertSavedPath,
+} from '../utils/saveJsonFile';
 
 const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
   navigation: _navigation,
 }) => {
   const { colors } = useTheme();
   const { t } = useLocalization();
-  const { user } = useAuth();
   const ble = useTelemetry();
-  const db = getFirestore(getApp());
-
-  const [data, setData] = useState<DiagnosticsData>(EMPTY_DIAGNOSTICS);
-  const [isFetching, setIsFetching] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [hasPermissionError, setHasPermissionError] = useState(false);
-
-  // --- Firestore: users/{uid}/diagnostics/latest ---
-  const fetchDiagnostics = useCallback(async () => {
-    if (!user?.uid) return;
-    setIsFetching(true);
-    try {
-      const docRef = doc(db, 'users', user.uid, 'diagnostics', 'latest');
-
-      const docSnap = await getDoc(docRef);
-
-      const snapData = docSnap.data();
-      if (snapData) {
-        setData({ ...EMPTY_DIAGNOSTICS, ...snapData } as DiagnosticsData);
-      } else {
-        // First time — initialize with empty data
-        console.log(
-          `[FuelFlow] No diagnostics for UID ${user.uid} — initializing...`,
-        );
-        await setDoc(docRef, {
-          ...EMPTY_DIAGNOSTICS,
-          lastUpdated: serverTimestamp(),
-        });
-        setData(EMPTY_DIAGNOSTICS);
-      }
-      setHasPermissionError(false);
-    } catch (error: any) {
-      if (error?.code === 'firestore/permission-denied') {
-        setHasPermissionError(true);
-        setData(EMPTY_DIAGNOSTICS);
-        return;
-      }
-      console.error('[FuelFlow] Diagnostics fetch error:', error);
-    } finally {
-      setIsFetching(false);
-      setIsInitialLoad(false);
-    }
-  }, [db, user?.uid]);
-
-  useEffect(() => {
-    fetchDiagnostics();
-  }, [fetchDiagnostics]);
-
-  const criticalCount = data.faultCodes.filter(
-    f => f.severity === 'critical',
-  ).length;
-  const warningCount = data.faultCodes.filter(
-    f => f.severity === 'warning',
-  ).length;
-  const totalFaults = data.faultCodes.length;
 
   const [faultQuery, setFaultQuery] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const faultCodes: EspFaultCodeRow[] = ble.isConnected ? ble.espFaultCodes : [];
+
+  const criticalCount = faultCodes.filter(f => f.severity === 'critical').length;
+  const warningCount = faultCodes.filter(f => f.severity === 'warning').length;
+  const totalFaults = faultCodes.length;
 
   const filteredFaults = useMemo(() => {
     const q = faultQuery.trim().toLowerCase();
-    if (!q) return data.faultCodes;
-    return data.faultCodes.filter(
+    if (!q) return faultCodes;
+    return faultCodes.filter(
       f =>
         f.code.toLowerCase().includes(q) ||
         f.description.toLowerCase().includes(q),
     );
-  }, [data.faultCodes, faultQuery]);
+  }, [faultCodes, faultQuery]);
 
   const exportDiagnosticsJson = useCallback(async () => {
+    setExporting(true);
     try {
-      await Share.share({
-        title: 'FuelFlow Diagnostics',
-        message: JSON.stringify(
-          { exportedAt: new Date().toISOString(), ...data },
-          null,
-          2,
-        ),
-      });
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        source: ble.isConnected ? 'esp32_ble' : 'offline',
+        bleConnected: ble.isConnected,
+        faultCodes: ble.isConnected ? ble.espFaultCodes : [],
+        telemetry: ble.telemetry,
+        tripBroadcast: ble.espTripBroadcast,
+        tripJson: ble.lastTripJson,
+        histJson: ble.lastHistJson,
+        histTrips: ble.espHistTrips,
+      };
+      const path = await saveFuelFlowJsonFile(
+        'diagnostics-snapshot',
+        JSON.stringify(payload, null, 2),
+      );
+      alertSavedPath(path, t);
     } catch (e) {
       Alert.alert(t('export_json'), String(e));
+    } finally {
+      setExporting(false);
     }
-  }, [data, t]);
+  }, [
+    ble.isConnected,
+    ble.espFaultCodes,
+    ble.telemetry,
+    ble.lastTripJson,
+    ble.espTripBroadcast,
+    ble.lastHistJson,
+    ble.espHistTrips,
+    t,
+  ]);
 
-  const clearStoredFaults = useCallback(() => {
-    if (!user?.uid) return;
-    Alert.alert(t('clear_faults'), t('clear_faults_confirm'), [
-      { text: t('close'), style: 'cancel' },
-      {
-        text: t('clear_faults'),
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const docRef = doc(db, 'users', user.uid, 'diagnostics', 'latest');
-            await setDoc(docRef, {
-              ...EMPTY_DIAGNOSTICS,
-              lastUpdated: serverTimestamp(),
-            });
-            setData(EMPTY_DIAGNOSTICS);
-          } catch (e) {
-            console.error(e);
-          }
-        },
-      },
-    ]);
-  }, [db, user?.uid, t]);
+  const onRefreshEsp = useCallback(async () => {
+    if (!ble.isConnected) return;
+    setRefreshing(true);
+    try {
+      await ble.refreshEspLive();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [ble]);
 
   const getSeverityColor = (severity: string) =>
     severity === 'critical' ? colors.danger : colors.warning;
@@ -167,22 +100,6 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
   const getSeverityBg = (severity: string) =>
     severity === 'critical' ? `${colors.danger}20` : `${colors.warning}20`;
   const bottomSpacerStyle = styles.bottomSpacer;
-
-  if (isInitialLoad) {
-    return (
-      <View
-        style={[
-          styles.loadingContainer,
-          { backgroundColor: colors.background },
-        ]}
-      >
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          {t('loading_diagnostics')}
-        </Text>
-      </View>
-    );
-  }
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.background }}>
@@ -205,15 +122,20 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
             <TouchableOpacity
               style={[styles.refreshBtn, { borderColor: colors.border }]}
               onPress={exportDiagnosticsJson}
+              disabled={exporting}
             >
-              <Icon name="share" size={15} color={colors.textSecondary} />
+              {exporting ? (
+                <ActivityIndicator size="small" color={colors.textSecondary} />
+              ) : (
+                <Icon name="download" size={15} color={colors.textSecondary} />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.refreshBtn, { borderColor: colors.border }]}
-              onPress={fetchDiagnostics}
-              disabled={isFetching}
+              onPress={onRefreshEsp}
+              disabled={refreshing || !ble.isConnected}
             >
-              {isFetching ? (
+              {refreshing ? (
                 <ActivityIndicator size="small" color={colors.textSecondary} />
               ) : (
                 <Icon name="refresh-cw" size={15} color={colors.textSecondary} />
@@ -239,6 +161,44 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
           />
         ) : null}
 
+        {ble.isConnected ? (
+          <View
+            style={[
+              styles.espLiveCard,
+              {
+                backgroundColor: colors.cardBackground,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.espLiveTitle, { color: colors.textSecondary }]}>
+              {t('diag_live_esp')}
+            </Text>
+            <Text style={[styles.espLiveLine, { color: colors.text }]}>
+              spd {ble.telemetry.speed} · rpm {ble.telemetry.rpm} · thr{' '}
+              {ble.telemetry.throttlePosition}% · cool {ble.telemetry.coolant}°C · iat{' '}
+              {ble.telemetry.iat != null ? `${ble.telemetry.iat.toFixed(0)}°C` : '—'} · run{' '}
+              {ble.telemetry.engineRunning ? '1' : '0'}
+            </Text>
+            <Text style={[styles.espLiveLine, { color: colors.text }]}>
+              lph {ble.telemetry.lph?.toFixed(2) ?? '—'} · l100{' '}
+              {ble.telemetry.fuelConsumption.toFixed(1)} · kpl{' '}
+              {ble.telemetry.kpl?.toFixed(2) ?? '—'} · mpg{' '}
+              {ble.telemetry.mpg?.toFixed(1) ?? '—'}
+            </Text>
+            <Text style={[styles.espLiveLine, { color: colors.text }]}>
+              {t('efficiency_score')} {ble.telemetry.efficiencyScore ?? '—'} ·{' '}
+              {t('hard_accel_events')} {ble.telemetry.hardAccel ?? '—'} ·{' '}
+              {t('hard_brake_events')} {ble.telemetry.hardBrake ?? '—'}
+            </Text>
+            {ble.espTripBroadcast?.rtcTimeString ? (
+              <Text style={[styles.espLiveRtc, { color: colors.textSecondary }]}>
+                {t('device_rtc_time')}: {ble.espTripBroadcast.rtcTimeString}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         {!ble.isConnected ? (
           <View
             style={[
@@ -259,96 +219,63 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
           </View>
         ) : null}
 
-        {ble.isConnected &&
-        totalFaults > 0 &&
-        !hasPermissionError && (
-          <TouchableOpacity
-            style={[styles.clearBtn, { borderColor: colors.danger }]}
-            onPress={clearStoredFaults}
-          >
-            <Text style={[styles.clearBtnText, { color: colors.danger }]}>
-              {t('clear_faults')}
-            </Text>
-          </TouchableOpacity>
-        )}
-
         {/* ── Stats Row ── */}
         {ble.isConnected ? (
-        <View className="flex-row" style={styles.statsRow}>
-          <View
-            style={[
-              styles.statBox,
-              {
-                backgroundColor: `${colors.danger}10`,
-                borderColor: `${colors.danger}20`,
-              },
-            ]}
-          >
-            <Text style={[styles.statNumber, { color: colors.danger }]}>
-              {criticalCount}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.danger }]}>
-              {t('critical_label')}
-            </Text>
+          <View className="flex-row" style={styles.statsRow}>
+            <View
+              style={[
+                styles.statBox,
+                {
+                  backgroundColor: `${colors.danger}10`,
+                  borderColor: `${colors.danger}20`,
+                },
+              ]}
+            >
+              <Text style={[styles.statNumber, { color: colors.danger }]}>
+                {criticalCount}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.danger }]}>
+                {t('critical_label')}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.statBox,
+                {
+                  backgroundColor: `${colors.warning}10`,
+                  borderColor: `${colors.warning}20`,
+                },
+              ]}
+            >
+              <Text style={[styles.statNumber, { color: colors.warning }]}>
+                {warningCount}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.warning }]}>
+                {t('warning_label')}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.statBox,
+                {
+                  backgroundColor: `${colors.success}10`,
+                  borderColor: `${colors.success}20`,
+                },
+              ]}
+            >
+              <Text style={[styles.statNumber, { color: colors.success }]}>
+                {totalFaults === 0 ? 'OK' : totalFaults}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.success }]}>
+                {totalFaults === 0 ? t('status_label') : t('total_label')}
+              </Text>
+            </View>
           </View>
-          <View
-            style={[
-              styles.statBox,
-              {
-                backgroundColor: `${colors.warning}10`,
-                borderColor: `${colors.warning}20`,
-              },
-            ]}
-          >
-            <Text style={[styles.statNumber, { color: colors.warning }]}>
-              {warningCount}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.warning }]}>
-              {t('warning_label')}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.statBox,
-              {
-                backgroundColor: `${colors.success}10`,
-                borderColor: `${colors.success}20`,
-              },
-            ]}
-          >
-            <Text style={[styles.statNumber, { color: colors.success }]}>
-              {totalFaults === 0 ? 'OK' : totalFaults}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.success }]}>
-              {totalFaults === 0 ? t('status_label') : t('total_label')}
-            </Text>
-          </View>
-        </View>
         ) : null}
 
         {/* ── Fault List ── */}
         <View className="px-4" style={styles.faultSection}>
-          {hasPermissionError ? (
-            <View
-              style={[
-                styles.noFaultsCard,
-                {
-                  backgroundColor: colors.cardBackground,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Icon name="circle-alert" size={40} color={colors.warning} />
-              <Text style={[styles.noFaultsTitle, { color: colors.text }]}>
-                {t('permission_needed')}
-              </Text>
-              <Text
-                style={[styles.noFaultsText, { color: colors.textSecondary }]}
-              >
-                {t('permission_check_rules')}
-              </Text>
-            </View>
-          ) : !ble.isConnected ? null : totalFaults === 0 ? (
+          {!ble.isConnected ? null : totalFaults === 0 ? (
             <View
               style={[
                 styles.noFaultsCard,
@@ -365,7 +292,7 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
               <Text
                 style={[styles.noFaultsText, { color: colors.textSecondary }]}
               >
-                {t('no_active_faults')}
+                {t('no_ecu_codes')}
               </Text>
             </View>
           ) : filteredFaults.length === 0 ? (
@@ -447,14 +374,16 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
                         </Text>
                       </View>
                     </View>
-                    <Text
-                      style={[
-                        styles.faultDescription,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      {fault.description}
-                    </Text>
+                    {fault.description ? (
+                      <Text
+                        style={[
+                          styles.faultDescription,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {fault.description}
+                      </Text>
+                    ) : null}
                     <Text
                       style={[
                         styles.faultTimestamp,
@@ -472,22 +401,22 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
 
         {/* ── Protocol Info ── */}
         {ble.isConnected ? (
-        <View
-          style={[
-            styles.protocolCard,
-            {
-              backgroundColor: colors.cardBackground,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.protocolLabel, { color: colors.textSecondary }]}>
-            {t('obd_protocol')}
-          </Text>
-          <Text style={[styles.protocolValue, { color: colors.text }]}>
-            {data.protocolSpeed !== '—' ? `CAN ${data.protocolSpeed}` : '—'}
-          </Text>
-        </View>
+          <View
+            style={[
+              styles.protocolCard,
+              {
+                backgroundColor: colors.cardBackground,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.protocolLabel, { color: colors.textSecondary }]}>
+              {t('obd_protocol')}
+            </Text>
+            <Text style={[styles.protocolValue, { color: colors.text }]}>
+              CAN 500 kbps
+            </Text>
+          </View>
         ) : null}
 
         {/* ── BLE Status ── */}
@@ -529,13 +458,6 @@ const DiagnosticsScreen: React.FC<DiagnosticsTabScreenProps> = ({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-  },
-  loadingText: { fontSize: 13, fontWeight: '500' },
 
   sectionHeader: {
     flexDirection: 'row',
@@ -548,6 +470,22 @@ const styles = StyleSheet.create({
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  espLiveCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+  },
+  espLiveTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  espLiveLine: { fontSize: 11, lineHeight: 17, fontFamily: 'Courier New' },
+  espLiveRtc: { fontSize: 10, marginTop: 4 },
   searchInput: {
     marginHorizontal: 16,
     marginBottom: 10,
@@ -557,15 +495,6 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 12 : 8,
     fontSize: 15,
   },
-  clearBtn: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  clearBtnText: { fontSize: 13, fontWeight: '700' },
   bleBanner: {
     marginHorizontal: 16,
     marginBottom: 16,
