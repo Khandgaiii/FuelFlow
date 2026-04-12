@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "301509148498-lt0qqihq7tenp6kpe6u5iagaoescv7ac.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.fuelflow.moko",
+            "certificate_hash": "5e8996b024edbbf291936db565c526cc1580b2d4"
+          }
+        },
+        {
           "client_id": "301509148498-v1vrrgvmsdj6rn1u238o4nkjfrfeqf1i.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

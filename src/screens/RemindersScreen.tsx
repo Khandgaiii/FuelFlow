@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -6,8 +6,11 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import Geolocation from '@react-native-community/geolocation';
 import { getApp } from '@react-native-firebase/app';
 import {
   doc,
@@ -66,12 +69,10 @@ const EMPTY_REMINDERS: RemindersData = {
   nextServiceDate: '—',
 };
 
-// --- Leaflet OSM Map HTML ---
+// --- Leaflet OSM Map HTML (fetches nearby fuel stations via Overpass API) ---
 const buildMapHTML = (
-  lat: number,
-  lng: number,
-  stationName: string,
-  stationKm: number,
+  userLat: number,
+  userLng: number,
   isDark: boolean,
 ) => `
 <!DOCTYPE html>
@@ -85,17 +86,42 @@ const buildMapHTML = (
     html, body, #map { width: 100%; height: 100%; }
     body { background: ${isDark ? '#111' : '#f5f5f5'}; }
     .leaflet-container { background: ${isDark ? '#1a1a1a' : '#e8e8e8'}; }
-    .custom-pin {
+    .station-pin {
       background: #EF4444;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      border: 2.5px solid #fff;
+      box-shadow: 0 0 0 1.5px #EF4444, 0 2px 6px rgba(0,0,0,0.35);
+    }
+    .station-pin.nearest {
+      background: #22C55E;
+      width: 16px; height: 16px;
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 2px #22C55E, 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .user-pin {
+      background: #3B82F6;
       width: 14px; height: 14px;
       border-radius: 50%;
       border: 3px solid #fff;
-      box-shadow: 0 0 0 2px #EF4444, 0 2px 8px rgba(0,0,0,0.4);
+      box-shadow: 0 0 0 2px #3B82F6, 0 0 12px rgba(59,130,246,0.5);
+    }
+    .user-pulse {
+      position: absolute;
+      top: -6px; left: -6px;
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: rgba(59,130,246,0.2);
+      animation: pulse 2s ease-out infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.8); opacity: 1; }
+      100% { transform: scale(2.2); opacity: 0; }
     }
     .station-label {
       background: ${isDark ? '#1e1e1e' : '#fff'};
       color: ${isDark ? '#fff' : '#111'};
-      font-family: monospace;
+      font-family: -apple-system, sans-serif;
       font-size: 11px;
       font-weight: 600;
       padding: 4px 8px;
@@ -103,46 +129,176 @@ const buildMapHTML = (
       border: 1px solid ${isDark ? '#333' : '#ddd'};
       white-space: nowrap;
       box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .station-label .dist {
+      color: ${isDark ? '#9CA3AF' : '#6B7280'};
+      font-size: 10px;
+      font-weight: 500;
+    }
+    .station-label.nearest {
+      border-color: #22C55E;
+      background: ${isDark ? '#0a2010' : '#F0FDF4'};
+    }
+    .status-bar {
+      position: absolute;
+      bottom: 8px; left: 8px; right: 8px;
+      z-index: 1000;
+      background: ${isDark ? '#1e1e1e' : '#fff'};
+      color: ${isDark ? '#ccc' : '#333'};
+      font-family: -apple-system, sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid ${isDark ? '#333' : '#ddd'};
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      text-align: center;
     }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="status" class="status-bar">Searching for gas stations...</div>
   <script>
+    var userLat = ${userLat}, userLng = ${userLng};
+    var statusEl = document.getElementById('status');
+
     var map = L.map('map', {
-      center: [${lat}, ${lng}],
-      zoom: 15,
+      center: [userLat, userLng],
+      zoom: 14,
       zoomControl: true,
       attributionControl: false,
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      ${isDark ? "className: 'dark-tiles'," : ''}
     }).addTo(map);
 
-    ${
-      isDark
-        ? `
-    // Dark filter via CSS injection
+    L.control.scale({ imperial: false, metric: true, maxWidth: 120 }).addTo(map);
+
+    ${isDark ? `
     var style = document.createElement('style');
     style.innerHTML = '.leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }';
     document.head.appendChild(style);
-    `
-        : ''
+    ` : ''}
+
+    // User location marker
+    var userIcon = L.divIcon({
+      className: '',
+      html: '<div style="position:relative"><div class="user-pulse"></div><div class="user-pin"></div></div>',
+      iconSize: [14,14], iconAnchor: [7,7]
+    });
+    L.marker([userLat, userLng], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+
+    function toRad(d) { return d * Math.PI / 180; }
+    function haversine(lat1, lng1, lat2, lng2) {
+      var R = 6371;
+      var dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+      var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+              Math.cos(toRad(lat1))*Math.cos(toRad(lat2)) *
+              Math.sin(dLng/2)*Math.sin(dLng/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // Station marker
-    var pinIcon = L.divIcon({ className: '', html: '<div class="custom-pin"></div>', iconSize: [14,14], iconAnchor: [7,7] });
-    L.marker([${lat}, ${lng}], { icon: pinIcon }).addTo(map);
+    function renderStations(elements) {
+      var stations = elements.map(function(el) {
+        var slat = el.lat || (el.center && el.center.lat);
+        var slng = el.lon || (el.center && el.center.lon);
+        if (!slat || !slng) return null;
+        var name = (el.tags && (el.tags.name || el.tags.brand || el.tags.operator)) || 'Gas Station';
+        var dist = haversine(userLat, userLng, slat, slng);
+        return { lat: slat, lng: slng, name: name, dist: dist };
+      }).filter(function(s) { return s; });
 
-    // Label
-    var label = '${stationName !== '—' ? stationName : 'Ойрын шатахуун'}${
-  stationKm > 0 ? ` · ${stationKm} km` : ''
-}';
-    L.marker([${lat}, ${lng}], {
-      icon: L.divIcon({ className: '', html: '<div class="station-label">' + label + '</div>', iconSize: [0,0], iconAnchor: [-16, 28] })
-    }).addTo(map);
+      stations.sort(function(a, b) { return a.dist - b.dist; });
+
+      if (stations.length === 0) {
+        statusEl.textContent = 'No gas stations found nearby';
+        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'no_stations' }));
+        return;
+      }
+
+      var bounds = [[userLat, userLng]];
+      stations.forEach(function(s, i) {
+        var isNearest = (i === 0);
+        var pinClass = isNearest ? 'station-pin nearest' : 'station-pin';
+        var labelClass = isNearest ? 'station-label nearest' : 'station-label';
+        var size = isNearest ? [16,16] : [12,12];
+        var anchor = isNearest ? [8,8] : [6,6];
+
+        var icon = L.divIcon({ className: '', html: '<div class="' + pinClass + '"></div>', iconSize: size, iconAnchor: anchor });
+        var marker = L.marker([s.lat, s.lng], { icon: icon }).addTo(map);
+
+        var distText = s.dist < 1 ? (s.dist * 1000).toFixed(0) + ' m' : s.dist.toFixed(1) + ' km';
+        marker.bindPopup('<b>' + s.name + '</b><br><span style="color:#6B7280;font-size:12px">' + distText + '</span>', { closeButton: false });
+
+        if (isNearest || i < 5) {
+          var lbl = L.divIcon({
+            className: '',
+            html: '<div class="' + labelClass + '">' + s.name + ' <span class="dist">' + distText + '</span></div>',
+            iconSize: [0,0], iconAnchor: [-12, 24]
+          });
+          L.marker([s.lat, s.lng], { icon: lbl, interactive: false }).addTo(map);
+        }
+        bounds.push([s.lat, s.lng]);
+      });
+
+      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+
+      var nearest = stations[0];
+      var nDist = nearest.dist < 1 ? (nearest.dist * 1000).toFixed(0) + ' m' : nearest.dist.toFixed(1) + ' km';
+      statusEl.innerHTML = '<span style="color:#22C55E">\\u25CF</span> ' +
+        stations.length + ' stations &middot; Nearest: <b>' + nearest.name + '</b> (' + nDist + ')';
+
+      window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'stations_loaded',
+        count: stations.length,
+        nearest: { name: nearest.name, dist: nearest.dist, lat: nearest.lat, lng: nearest.lng }
+      }));
+    }
+
+    var OVERPASS_SERVERS = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter'
+    ];
+
+    function tryFetch(serverIdx) {
+      if (serverIdx >= OVERPASS_SERVERS.length) {
+        statusEl.textContent = 'Could not load stations (network error)';
+        return;
+      }
+      var radius = 5000;
+      var query = '[out:json][timeout:15];(node["amenity"="fuel"](around:' + radius + ',' + userLat + ',' + userLng + ');way["amenity"="fuel"](around:' + radius + ',' + userLat + ',' + userLng + '););out center body;';
+      var url = OVERPASS_SERVERS[serverIdx];
+
+      statusEl.textContent = 'Searching for gas stations...';
+
+      fetch(url, {
+        method: 'POST',
+        body: 'data=' + encodeURIComponent(query),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        if (data && data.elements) {
+          renderStations(data.elements);
+        } else {
+          throw new Error('Bad response');
+        }
+      })
+      .catch(function(err) {
+        tryFetch(serverIdx + 1);
+      });
+    }
+
+    tryFetch(0);
   </script>
 </body>
 </html>
@@ -181,7 +337,7 @@ const StatCard: React.FC<StatCardProps> = ({
   const statUnitStyle = { color: barColor, opacity: 0.6 };
   const statFillStyle = {
     backgroundColor: barColor,
-    width: noData ? '0%' : `${pct}%`,
+    width: (noData ? '0%' : `${pct}%`) as import('react-native').DimensionValue,
   };
   return (
     <View
@@ -311,11 +467,75 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
   const [isFetching, setIsFetching] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [hasPermissionError, setHasPermissionError] = useState(false);
+  const [nearestStation, setNearestStation] = useState<{
+    name: string;
+    dist: number;
+    count: number;
+  } | null>(null);
+  const [userLocation, setUserLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [mapKey, setMapKey] = useState(0);
+  const locationFetched = useRef(false);
 
   const isDark =
     colors.background === '#000000' ||
     colors.background === '#000' ||
     (colors.background ?? '').toLowerCase() < '#888888';
+
+  useEffect(() => {
+    if (locationFetched.current) return;
+    locationFetched.current = true;
+
+    const requestAndGetLocation = async () => {
+      if (Platform.OS === 'android') {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Location Permission',
+            message: 'FuelFlow needs your location to find nearby gas stations.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+          },
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          return;
+        }
+      }
+
+      Geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+          setMapKey((k) => k + 1);
+        },
+        (_err) => {},
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
+      );
+    };
+
+    requestAndGetLocation();
+  }, []);
+
+  const reloadMapLocation = useCallback(() => {
+    setNearestStation(null);
+    Geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+        setMapKey((k) => k + 1);
+      },
+      () => {
+        setMapKey((k) => k + 1);
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
+    );
+  }, []);
 
   // --- Firestore: users/{uid}/reminders/latest ---
   const fetchReminders = useCallback(async () => {
@@ -480,20 +700,33 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
             {t('nearest_station')}
           </Text>
-          {data.nearestStationKm > 0 && (
-            <View
-              style={[
-                styles.distanceBadge,
-                { backgroundColor: `${colors.primary}20` },
-              ]}
-            >
-              <Text
-                style={[styles.distanceBadgeText, { color: colors.primary }]}
+          <View style={styles.mapHeaderRight}>
+            {(nearestStation || data.nearestStationKm > 0) && (
+              <View
+                style={[
+                  styles.distanceBadge,
+                  { backgroundColor: `${colors.primary}20` },
+                ]}
               >
-                {data.nearestStationKm} km
-              </Text>
-            </View>
-          )}
+                <Text
+                  style={[styles.distanceBadgeText, { color: colors.primary }]}
+                >
+                  {nearestStation
+                    ? nearestStation.dist < 1
+                      ? `${(nearestStation.dist * 1000).toFixed(0)} m`
+                      : `${nearestStation.dist.toFixed(1)} km`
+                    : `${data.nearestStationKm} km`}
+                </Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[styles.mapRefreshBtn, { borderColor: colors.border }]}
+              onPress={reloadMapLocation}
+              accessibilityLabel={t('map_refresh')}
+            >
+              <Icon name="refresh-cw" size={15} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View
@@ -501,12 +734,11 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
           style={[styles.mapCard, { borderColor: colors.border }]}
         >
           <WebView
+            key={mapKey}
             source={{
               html: buildMapHTML(
-                data.nearestStationLat,
-                data.nearestStationLng,
-                data.nearestStationName,
-                data.nearestStationKm,
+                userLocation?.lat ?? data.nearestStationLat,
+                userLocation?.lng ?? data.nearestStationLng,
                 isDark,
               ),
             }}
@@ -517,30 +749,51 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
             domStorageEnabled
             originWhitelist={['*']}
             allowsInlineMediaPlayback
+            onMessage={(event) => {
+              try {
+                const msg = JSON.parse(event.nativeEvent.data);
+                if (msg.type === 'stations_loaded') {
+                  setNearestStation({
+                    name: msg.nearest.name,
+                    dist: msg.nearest.dist,
+                    count: msg.count,
+                  });
+                }
+              } catch {}
+            }}
           />
-          {data.nearestStationName !== '—' && (
-            <View
-              style={[
-                styles.mapFooter,
-                {
-                  backgroundColor: colors.cardBackground,
-                  borderTopColor: colors.border,
-                },
-              ]}
+          <View
+            style={[
+              styles.mapFooter,
+              {
+                backgroundColor: colors.cardBackground,
+                borderTopColor: colors.border,
+              },
+            ]}
+          >
+            <Icon
+              name="map-pin"
+              size={14}
+              color={nearestStation ? '#22C55E' : (colors.danger ?? '#EF4444')}
+            />
+            <Text
+              style={[styles.mapFooterText, { color: colors.text }]}
+              numberOfLines={1}
             >
-              <Icon
-                name="map-pin"
-                size={14}
-                color={colors.danger ?? '#EF4444'}
-              />
-              <Text
-                style={[styles.mapFooterText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {data.nearestStationName}
+              {nearestStation
+                ? `${nearestStation.name} · ${
+                    nearestStation.dist < 1
+                      ? `${(nearestStation.dist * 1000).toFixed(0)} m`
+                      : `${nearestStation.dist.toFixed(1)} km`
+                  }`
+                : t('nearest_station')}
+            </Text>
+            {nearestStation && (
+              <Text style={[styles.stationCount, { color: colors.textSecondary }]}>
+                {nearestStation.count} found
               </Text>
-            </View>
-          )}
+            )}
+          </View>
         </View>
 
         {/* ── Next Service ── */}
@@ -586,7 +839,14 @@ const RemindersScreen: React.FC<RemindersTabScreenProps> = ({
           >
             {t('tips_header')}
           </Text>
-          {[t('tip_tire'), t('tip_cargo'), t('tip_driving')].map((tip, i) => (
+          {[
+            t('tip_1'),
+            t('tip_2'),
+            t('tip_3'),
+            t('tip_4'),
+            t('tip_5'),
+            t('tip_6'),
+          ].map((tip, i) => (
             <View
               key={i}
               style={[styles.tipRow, { borderBottomColor: colors.border }]}
@@ -662,12 +922,25 @@ const styles = StyleSheet.create({
   distanceBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   distanceBadgeText: { fontSize: 11, fontWeight: '700' },
 
+  mapHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mapRefreshBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   mapCard: {
     borderRadius: 16,
     borderWidth: 1,
     overflow: 'hidden',
     marginBottom: 12,
-    height: 300,
+    height: 320,
   },
   mapWebView: { flex: 1, backgroundColor: 'transparent' },
   mapFooter: {
@@ -679,6 +952,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   mapFooterText: { fontSize: 12, fontWeight: '600', flex: 1 },
+  stationCount: { fontSize: 11, fontWeight: '600' },
 
   nextServiceCard: {
     borderRadius: 14,

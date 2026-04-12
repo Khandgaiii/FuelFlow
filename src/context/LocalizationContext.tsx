@@ -22,7 +22,7 @@ const translations: Record<Language, Translations> = {
     no_signal: 'NO SIGNAL',
     live: 'LIVE',
     permission_error: 'No read permission — check Firebase Console → Firestore Rules.',
-    no_connection: 'Vehicle not connected — try simulation',
+    no_connection: 'Vehicle not connected — connect ESP32 in Connect tab',
     no_connection_reminders: 'Vehicle not connected — no data yet',
     system_status: 'SYSTEM STATUS',
     close: 'Close',
@@ -55,6 +55,10 @@ const translations: Record<Language, Translations> = {
     oil_pressure_unit: 'PSI',
     engine_load: 'Engine Load',
     engine_load_unit: '%',
+    session_averages: 'SESSION AVERAGES (BLE)',
+    avg_speed: 'Avg speed',
+    avg_rpm: 'Avg RPM',
+    avg_fuel: 'Avg fuel',
 
     // Diagnostics
     fault_codes: 'FAULT CODES',
@@ -67,6 +71,14 @@ const translations: Record<Language, Translations> = {
     obd_protocol: 'OBD-II Protocol',
     permission_needed: 'Permission Required',
     permission_check_rules: 'Check Firebase Console → Firestore Rules.',
+    search_faults: 'Search codes…',
+    export_json: 'Export JSON',
+    clear_faults: 'Clear stored codes',
+    clear_faults_confirm: 'Remove all fault codes from the cloud for this vehicle?',
+    fault_search_empty: 'No codes match your search.',
+    diagnostics_not_connected: 'Vehicle link not active',
+    diagnostics_connect_hint:
+      'Connect your FuelFlow ESP32 on the Connect tab to read live fault codes from the car.',
 
     // Reminders
     reminders_header: 'REMINDERS',
@@ -81,9 +93,19 @@ const translations: Record<Language, Translations> = {
     nearest_station: 'NEAREST STATION',
     next_service: 'NEXT SERVICE',
     tips_header: 'TIPS',
-    tip_tire: 'Regularly check tire pressure to save fuel.',
-    tip_cargo: 'Avoid carrying unnecessary cargo.',
-    tip_driving: 'Smooth acceleration and braking is most efficient.',
+    tip_1:
+      'Inflate tires to your vehicle’s recommended pressure (door jamb label). Under-inflated tires increase rolling resistance and fuel use.',
+    tip_2:
+      'Avoid long idling — turn the engine off if you’ll be stopped for more than about a minute (common U.S. DOE guidance).',
+    tip_3:
+      'Accelerate and brake smoothly; aggressive driving can lower fuel economy substantially versus steady driving.',
+    tip_4:
+      'Remove roof racks and extra weight when you don’t need them — added mass and drag reduce miles per gallon.',
+    tip_5:
+      'Use the engine oil viscosity grade recommended by your manufacturer for efficiency and engine protection.',
+    tip_6:
+      'Combine errands into one trip when possible — several cold starts and short hops use more fuel than one longer drive.',
+    map_refresh: 'Refresh map',
 
     // Settings
     account: 'Account',
@@ -99,9 +121,31 @@ const translations: Record<Language, Translations> = {
 
     // Navigation
     nav_dashboard: 'Dashboard',
+    nav_connect: 'Connect',
     nav_diagnostics: 'Diagnostics',
     nav_reminders: 'Reminders',
     nav_settings: 'Settings',
+
+    // Connect
+    connect_search: 'SEARCH DEVICES',
+    connect_search_ph: 'Filter by name or ID',
+    connect_scan: 'SCAN',
+    connect_scan_btn: 'Scan nearby (12s)',
+    connect_quick: 'Quick connect',
+    connect_devices: 'FOUND DEVICES',
+    connect_scanning: 'Scanning…',
+    connect_no_devices: 'No devices yet — tap Scan',
+    connect_status: 'CONNECTION',
+    connect_connected: 'Connected',
+    connect_disconnected: 'Not connected',
+    connect_state_scanning: 'Scanning for FuelFlow…',
+    connect_state_connecting: 'Connecting…',
+    connect_export_section: 'EXPORT JSON',
+    connect_export_telemetry: 'Live telemetry',
+    connect_export_diagnostics: 'Diagnostics snapshot',
+    connect_export_combined: 'Telemetry + diagnostics',
+    connect_export: 'Export',
+    connect_share_hint: 'Use Save to Files or share to another app from the Android sheet.',
   },
 
   mn: {
@@ -113,7 +157,7 @@ const translations: Record<Language, Translations> = {
     no_signal: 'ДОХИОГҮЙ',
     live: 'ШУУД',
     permission_error: 'Өгөгдөл уншах зөвшөөрөл байхгүй — Firebase Console → Firestore Rules шалгана уу.',
-    no_connection: 'Машин холбогдоогүй — Симуляц ашиглаж туршина уу',
+    no_connection: 'Машин холбогдоогүй — Connect табаас ESP32 холбоно уу',
     no_connection_reminders: 'Машин холбогдоогүй — Өгөгдөл ирээгүй байна',
     system_status: 'СИСТЕМИЙН ТӨЛӨВ',
     close: 'Хаах',
@@ -146,6 +190,10 @@ const translations: Record<Language, Translations> = {
     oil_pressure_unit: 'PSI',
     engine_load: 'Моторын ачаалал',
     engine_load_unit: '%',
+    session_averages: 'ДУУСГАЛТЫН ДУНДАЖ (BLE)',
+    avg_speed: 'Дундаж хурд',
+    avg_rpm: 'Дундаж эргэлт',
+    avg_fuel: 'Дундаж түлш',
 
     // Diagnostics
     fault_codes: 'АЛДААНЫ КОДУУД',
@@ -158,6 +206,14 @@ const translations: Record<Language, Translations> = {
     obd_protocol: 'OBD-II протокол',
     permission_needed: 'Зөвшөөрөл шаардлагатай',
     permission_check_rules: 'Firebase Console → Firestore Rules-ыг шалгана уу.',
+    search_faults: 'Код хайх…',
+    export_json: 'JSON экспорт',
+    clear_faults: 'Кодыг цэвэрлэх',
+    clear_faults_confirm: 'Бүх алдааны кодыг устгах уу?',
+    fault_search_empty: 'Таны хайлтад тохирох код алга.',
+    diagnostics_not_connected: 'Тээврийн холбоос идэвхгүй',
+    diagnostics_connect_hint:
+      'Машины шууд алдааны кодыг уншихын тулд Connect табаас FuelFlow ESP32-оо холбоно уу.',
 
     // Reminders
     reminders_header: 'САНУУЛГА',
@@ -172,9 +228,19 @@ const translations: Record<Language, Translations> = {
     nearest_station: 'ОЙРЫН ШАТАХУУН',
     next_service: 'ДАРААГИЙН ЗАСВАР',
     tips_header: 'ЗӨВЛӨМЖ',
-    tip_tire: 'Дугуйн даралтыг тогтмол шалгаж байх нь шатахуун хэмнэнэ.',
-    tip_cargo: 'Тэргэндээ шаардлагагүй ачаа авч явахаас зайлсхий.',
-    tip_driving: 'Жигд хурдасч, жигд тормозлох нь хамгийн үр ашигтай.',
+    tip_1:
+      'Дугуйн даралтыг машины зөвлөмжийн дагуу (их биеийн шошго) барина уу — бага даралт элэгдэл, түлшний зарцуулалтыг нэмэгдүүлнэ.',
+    tip_2:
+      'Удаан хоосон ажиллуулахгүй — ~1 минутаас илүү зогсолтонд хөдөлгүүр унтраана (ерөнхий зөвлөмж).',
+    tip_3:
+      'Жигд хурдасч, зөөлөн тормозлох нь түлшний үр ашгийг нэмэгдүүлнэ; тэвэгүй жолоо ихээр бууруулна.',
+    tip_4:
+      'Шаардлагагүй ачаа, дээврийн түгжээг авна — жин, эсэргүүцэл түлш иднэ.',
+    tip_5:
+      'Үйлдвэрлэгчийн зөвлөсөн тосны ангиллыг ашиглана уу — зөв тос хэмнэлт, хамгаалалтад тустай.',
+    tip_6:
+      'Ажлаа нэг аялалд нэгтгэх нь хүйтэн асах тоог багасгаж, нийт км-ийг оновчтой болгоно.',
+    map_refresh: 'Газрын зураг шинэчлэх',
 
     // Settings
     account: 'Бүртгэл',
@@ -190,9 +256,30 @@ const translations: Record<Language, Translations> = {
 
     // Navigation
     nav_dashboard: 'Самбар',
+    nav_connect: 'Холболт',
     nav_diagnostics: 'Оношлогоо',
     nav_reminders: 'Сануулга',
     nav_settings: 'Тохиргоо',
+
+    connect_search: 'ТӨХӨӨРӨМЖ ХАЙХ',
+    connect_search_ph: 'Нэр эсвэл ID-ээр шүүх',
+    connect_scan: 'СКАН',
+    connect_scan_btn: 'Ойрын төхөөрөмж (12с)',
+    connect_quick: 'Түргэн холболт',
+    connect_devices: 'ОЛДСОН ТӨХӨӨРӨМЖ',
+    connect_scanning: 'Скан хийж байна…',
+    connect_no_devices: 'Төхөөрөмж олдсонгүй — Скан дарна уу',
+    connect_status: 'ХОЛБОЛТ',
+    connect_connected: 'Холбогдсон',
+    connect_disconnected: 'Салсан',
+    connect_state_scanning: 'FuelFlow хайж байна…',
+    connect_state_connecting: 'Холбож байна…',
+    connect_export_section: 'JSON ЭКСПОРТ',
+    connect_export_telemetry: 'Шууд телеметри',
+    connect_export_diagnostics: 'Оношлогоо',
+    connect_export_combined: 'Телеметри + оношлогоо',
+    connect_export: 'Экспорт',
+    connect_share_hint: 'Android цэснээс хадгалах эсвэл хуваалцах.',
   },
 
   ja: {
@@ -204,7 +291,7 @@ const translations: Record<Language, Translations> = {
     no_signal: '信号なし',
     live: 'ライブ',
     permission_error: '読み取り権限がありません — Firebase Console → Firestore Rulesを確認してください。',
-    no_connection: '車両未接続 — シミュレーションをお試しください',
+    no_connection: '車両未接続 — ConnectタブでESP32に接続してください',
     no_connection_reminders: '車両未接続 — データがありません',
     system_status: 'システム状態',
     close: '閉じる',
@@ -237,6 +324,10 @@ const translations: Record<Language, Translations> = {
     oil_pressure_unit: 'PSI',
     engine_load: 'エンジン負荷',
     engine_load_unit: '%',
+    session_averages: 'セッション平均 (BLE)',
+    avg_speed: '平均速度',
+    avg_rpm: '平均回転数',
+    avg_fuel: '平均燃費',
 
     // Diagnostics
     fault_codes: '故障コード',
@@ -249,6 +340,14 @@ const translations: Record<Language, Translations> = {
     obd_protocol: 'OBD-IIプロトコル',
     permission_needed: '権限が必要です',
     permission_check_rules: 'Firebase Console → Firestore Rulesを確認してください。',
+    search_faults: 'コードを検索…',
+    export_json: 'JSONをエクスポート',
+    clear_faults: '保存コードを消去',
+    clear_faults_confirm: 'クラウド上の故障コードをすべて削除しますか？',
+    fault_search_empty: '検索に一致するコードはありません。',
+    diagnostics_not_connected: '車両リンクが無効です',
+    diagnostics_connect_hint:
+      '車からライブの故障コードを読むには、ConnectタブでFuelFlow ESP32を接続してください。',
 
     // Reminders
     reminders_header: 'リマインダー',
@@ -263,9 +362,19 @@ const translations: Record<Language, Translations> = {
     nearest_station: '最寄りのGS',
     next_service: '次回メンテ',
     tips_header: 'ヒント',
-    tip_tire: 'タイヤ空気圧を定期的にチェックして燃費を節約。',
-    tip_cargo: '不要な荷物は降ろしましょう。',
-    tip_driving: 'スムーズな加速とブレーキが最も効率的です。',
+    tip_1:
+      '車両の推奨空気圧（ドアジャムの表示）に合わせてタイヤを充填してください。低圧は転がり抵抗と燃費を悪化させます。',
+    tip_2:
+      '長時間のアイドリングは避け、約1分以上停車する場合はエンジンを切るのが一般的な省燃費の指針です。',
+    tip_3:
+      'スムーズな加速と穏やかな制動は燃費に効きます。急激な運転は燃費を大きく下げることがあります。',
+    tip_4:
+      '不要な積載やルーフキャリアは外すと、重量と空気抵抗が減り燃費が改善します。',
+    tip_5:
+      'メーカー推奨のエンジンオイル粘度を使うと、効率と保護のバランスが良くなります。',
+    tip_6:
+      '用事をまとめて一つの外出にすると、コールドスタートと走行距離を抑えられます。',
+    map_refresh: '地図を更新',
 
     // Settings
     account: 'アカウント',
@@ -281,9 +390,30 @@ const translations: Record<Language, Translations> = {
 
     // Navigation
     nav_dashboard: 'ダッシュボード',
+    nav_connect: '接続',
     nav_diagnostics: '診断',
     nav_reminders: 'リマインダー',
     nav_settings: '設定',
+
+    connect_search: 'デバイス検索',
+    connect_search_ph: '名前またはIDで絞り込み',
+    connect_scan: 'スキャン',
+    connect_scan_btn: '近くをスキャン (12秒)',
+    connect_quick: 'クイック接続',
+    connect_devices: '見つかったデバイス',
+    connect_scanning: 'スキャン中…',
+    connect_no_devices: 'デバイスなし — スキャンを押す',
+    connect_status: '接続状態',
+    connect_connected: '接続済み',
+    connect_disconnected: '未接続',
+    connect_state_scanning: 'FuelFlowを検索中…',
+    connect_state_connecting: '接続中…',
+    connect_export_section: 'JSONエクスポート',
+    connect_export_telemetry: 'ライブテレメトリ',
+    connect_export_diagnostics: '診断スナップショット',
+    connect_export_combined: 'テレメトリ＋診断',
+    connect_export: 'エクスポート',
+    connect_share_hint: '共有シートからファイルに保存できます。',
   },
 };
 

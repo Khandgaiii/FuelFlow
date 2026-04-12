@@ -11,7 +11,13 @@ import {
   Telemetry,
   EMPTY_TELEMETRY,
   BleStatus,
+  ScannedDevice,
 } from '../services/BleService';
+import {
+  initConnectionNotifications,
+  notifyDeviceConnected,
+  notifyDeviceDisconnected,
+} from '../services/connectionNotifications';
 
 interface TelemetryContextType {
   telemetry: Telemetry;
@@ -20,6 +26,10 @@ interface TelemetryContextType {
   isConnected: boolean;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
+  discoveredDevices: ScannedDevice[];
+  isDiscovering: boolean;
+  scanForDevices: () => Promise<void>;
+  connectToDeviceId: (deviceId: string) => Promise<void>;
 }
 
 const TelemetryContext = createContext<TelemetryContextType | undefined>(
@@ -32,10 +42,16 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({
   const [telemetry, setTelemetry] = useState<Telemetry>(EMPTY_TELEMETRY);
   const [bleStatus, setBleStatus] = useState<BleStatus>('idle');
   const [bleError, setBleError] = useState<string | null>(null);
+  const [discoveredDevices, setDiscoveredDevices] = useState<ScannedDevice[]>(
+    [],
+  );
+  const [isDiscovering, setIsDiscovering] = useState(false);
   const mounted = useRef(true);
+  const prevBleStatus = useRef<BleStatus | null>(null);
 
   useEffect(() => {
     mounted.current = true;
+    initConnectionNotifications().catch(() => {});
 
     bleService.setTelemetryListener(data => {
       if (mounted.current) setTelemetry(data);
@@ -58,6 +74,23 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const prev = prevBleStatus.current;
+    prevBleStatus.current = bleStatus;
+    if (prev === null) return;
+
+    if (bleStatus === 'connected' && prev !== 'connected') {
+      notifyDeviceConnected().catch(() => {});
+    } else if (
+      prev === 'connected' &&
+      (bleStatus === 'idle' ||
+        bleStatus === 'disconnected' ||
+        bleStatus === 'error')
+    ) {
+      notifyDeviceDisconnected().catch(() => {});
+    }
+  }, [bleStatus]);
+
   const connect = useCallback(async () => {
     setBleError(null);
     try {
@@ -72,11 +105,46 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({
     if (mounted.current) setTelemetry(EMPTY_TELEMETRY);
   }, []);
 
+  const scanForDevices = useCallback(async () => {
+    setBleError(null);
+    setIsDiscovering(true);
+    setDiscoveredDevices([]);
+    try {
+      const list = await bleService.scanNearbyDevices(12000);
+      if (mounted.current) setDiscoveredDevices(list);
+    } catch (e: any) {
+      if (mounted.current) setBleError(e.message ?? 'Scan failed');
+    } finally {
+      if (mounted.current) setIsDiscovering(false);
+    }
+  }, []);
+
+  const connectToDeviceId = useCallback(async (deviceId: string) => {
+    setBleError(null);
+    try {
+      await bleService.connectToDeviceId(deviceId);
+    } catch (e: any) {
+      if (mounted.current) setBleError(e.message);
+      throw e;
+    }
+  }, []);
+
   const isConnected = bleStatus === 'connected';
 
   return (
     <TelemetryContext.Provider
-      value={{ telemetry, bleStatus, bleError, isConnected, connect, disconnect }}
+      value={{
+        telemetry,
+        bleStatus,
+        bleError,
+        isConnected,
+        connect,
+        disconnect,
+        discoveredDevices,
+        isDiscovering,
+        scanForDevices,
+        connectToDeviceId,
+      }}
     >
       {children}
     </TelemetryContext.Provider>

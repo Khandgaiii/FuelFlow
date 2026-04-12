@@ -7,6 +7,7 @@ export type AuthStackParamList = {
 
 export type AppTabsParamList = {
   DashboardTab: undefined;
+  ConnectTab: undefined;
   DiagnosticsTab: undefined;
   RemindersTab: undefined;
   SettingsTab: undefined;
@@ -19,6 +20,7 @@ export type LoginScreenProps = NativeStackScreenProps<AuthStackParamList, 'Login
 
 // App screens
 export type DashboardTabScreenProps = BottomTabScreenProps<AppTabsParamList, 'DashboardTab'>;
+export type ConnectTabScreenProps = BottomTabScreenProps<AppTabsParamList, 'ConnectTab'>;
 export type DiagnosticsTabScreenProps = BottomTabScreenProps<AppTabsParamList, 'DiagnosticsTab'>;
 export type RemindersTabScreenProps = BottomTabScreenProps<AppTabsParamList, 'RemindersTab'>;
 export type SettingsTabScreenProps = BottomTabScreenProps<AppTabsParamList, 'SettingsTab'>;

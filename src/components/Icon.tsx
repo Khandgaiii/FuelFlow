@@ -17,6 +17,7 @@ export type IconName =
   | 'refresh-cw'
   | 'settings'
   | 'shield'
+  | 'share'
   | 'sun'
   | 'thermometer'
   | 'triangle-alert'
@@ -41,6 +42,7 @@ const MCI_MAP: Record<IconName, string> = {
   'refresh-cw': 'refresh',
   settings: 'cog-outline',
   shield: 'shield-outline',
+  share: 'share-variant',
   sun: 'white-balance-sunny',
   thermometer: 'thermometer',
   'triangle-alert': 'alert-outline',

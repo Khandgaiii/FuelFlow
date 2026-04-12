@@ -99,7 +99,7 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file('my-upload-key.keystore')
+            storeFile file('my-upload-key2.keystore')
             storePassword 'fuelflow123'
             keyAlias 'my-key-alias'
             keyPassword 'fuelflow123'

@@ -102,7 +102,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   };
   const fillStyle = {
     backgroundColor: barColor,
-    width: `${percentage}%`,
+    width: `${percentage}%` as import('react-native').DimensionValue,
     height,
     borderRadius: height / 2,
   };

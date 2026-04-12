@@ -10,7 +10,8 @@ import Svg, {
 import { useTheme } from '../context/ThemeContext';
 
 interface RadialGaugeProps {
-  value: number;
+  /** Pass `null` when ESP is not connected — shows em dash, empty ring */
+  value: number | null;
   maxValue: number;
   label: string;
   unit: string;
@@ -56,13 +57,15 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
   const END_ANGLE = 405;
   const SWEEP = END_ANGLE - START_ANGLE;
 
-  const clampedValue = Math.min(Math.max(value, 0), maxValue);
+  const isEmpty = value === null || value === undefined;
+  const numValue = isEmpty ? 0 : value;
+  const clampedValue = Math.min(Math.max(numValue, 0), maxValue);
   const progress = clampedValue / maxValue;
   const fillEndAngle = START_ANGLE + SWEEP * progress;
 
   const trackPath = describeArc(cx, cy, radius, START_ANGLE, END_ANGLE);
   const fillPath =
-    progress > 0
+    !isEmpty && progress > 0
       ? describeArc(
           cx,
           cy,
@@ -73,10 +76,12 @@ export const RadialGauge: React.FC<RadialGaugeProps> = ({
       : null;
 
   const displayValue =
-    unit === 'x1000' ? (value / 1000).toFixed(1) : String(value);
+    unit === 'x1000'
+      ? (numValue / 1000).toFixed(1)
+      : String(Math.round(numValue));
   const displayUnit = unit === 'x1000' ? 'RPM' : unit;
 
-  const noData = value === 0;
+  const noData = isEmpty;
   const dimTrack = colors.border;
   const gradientId = `grad-${label.replace(/\s/g, '')}`;
 

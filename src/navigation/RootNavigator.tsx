@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 // Screens
 import LoginScreen from '../screens/LoginScreen';
 import DashboardScreen from '../screens/DashboardScreen';
+import ConnectScreen from '../screens/ConnectScreen';
 import DiagnosticsScreen from '../screens/DiagnosticsScreen';
 import RemindersScreen from '../screens/RemindersScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -87,6 +88,7 @@ type TabIconProps = { color: string; focused: boolean; size: number };
 
 const TAB_ICONS: Record<string, { active: string; inactive: string }> = {
   DashboardTab: { active: 'gauge', inactive: 'gauge' },
+  ConnectTab: { active: 'bluetooth-connect', inactive: 'bluetooth' },
   DiagnosticsTab: { active: 'wrench', inactive: 'wrench-outline' },
   RemindersTab: { active: 'bell', inactive: 'bell-outline' },
   SettingsTab: { active: 'cog', inactive: 'cog-outline' },
@@ -140,6 +142,11 @@ const AppTabs = () => {
         name="DashboardTab"
         component={DashboardScreen}
         options={{ title: t('nav_dashboard') }}
+      />
+      <Tab.Screen
+        name="ConnectTab"
+        component={ConnectScreen}
+        options={{ title: t('nav_connect') }}
       />
       <Tab.Screen
         name="DiagnosticsTab"

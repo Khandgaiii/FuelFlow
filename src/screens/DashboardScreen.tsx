@@ -26,7 +26,7 @@ import { useTelemetry } from '../context/TelemetryContext';
 import { RadialGauge } from '../components/RadialGauge';
 import { VehicleStatus } from '../components/VehicleStatus';
 import { AppHeader } from '../navigation/RootNavigator';
-import { MAX_RPM, MAX_THROTTLE } from '../constants/mockData';
+import { MAX_RPM, MAX_THROTTLE } from '../constants/telemetry';
 
 const EMPTY_TELEMETRY = {
   speed: 0,
@@ -54,45 +54,16 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
 
   const ble = useTelemetry();
 
-  const [data, setData] = useState(EMPTY_TELEMETRY);
   const [isFetching, setIsFetching] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastSynced, setLastSynced] = useState<string | null>(null);
 
-  // BLE data takes priority over Firestore
-  const activeData = ble.isConnected
-    ? { ...EMPTY_TELEMETRY, ...ble.telemetry, lastUpdated: new Date() }
-    : data;
-  const activeConnected = ble.isConnected || isConnected;
-
-  // Pulse animation for live dot
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   // Spin animation for refresh icon
   const spinAnim = useRef(new Animated.Value(0)).current;
   const [hasPermissionError, setHasPermissionError] = useState(false);
 
-  const anyConnected = ble.isConnected || isConnected;
-  useEffect(() => {
-    if (anyConnected) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 0.3,
-            duration: 900,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 900,
-            useNativeDriver: true,
-          }),
-        ]),
-      ).start();
-    } else {
-      pulseAnim.setValue(1);
-    }
-  }, [anyConnected, pulseAnim]);
+  /** Live dashboard values come only from ESP32 BLE — never from Firestore. */
+  const tel = ble.telemetry;
+  const hasEsp = ble.isConnected;
 
   const spinRefresh = useCallback(() => {
     spinAnim.setValue(0);
@@ -118,14 +89,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
 
       const docSnap = await getDoc(docRef);
 
-      const snapData = docSnap.data();
-      if (snapData) {
-        const fetched = { ...EMPTY_TELEMETRY, ...snapData } as typeof EMPTY_TELEMETRY;
-        setData(fetched);
-        setIsConnected(
-          fetched.speed > 0 || fetched.rpm > 0 || fetched.battery > 0,
-        );
-      } else {
+      if (!docSnap.exists) {
         console.log(
           `[FuelFlow] No doc for UID ${user.uid} — creating with zeros...`,
         );
@@ -133,24 +97,11 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
           ...EMPTY_TELEMETRY,
           lastUpdated: serverTimestamp(),
         });
-        setData(EMPTY_TELEMETRY);
-        setIsConnected(false);
       }
       setHasPermissionError(false);
-      // Record sync time
-      const now = new Date();
-      setLastSynced(
-        now.toLocaleTimeString('mn-MN', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-      );
     } catch (error: any) {
       if (error?.code === 'firestore/permission-denied') {
         setHasPermissionError(true);
-        setData(EMPTY_TELEMETRY);
-        setIsConnected(false);
         return;
       }
       console.error('[FuelFlow] Fetch error:', error);
@@ -164,58 +115,67 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
     ensureAndFetchTelemetry();
   }, [ensureAndFetchTelemetry]);
 
-  // --- Simulator ---
-  const simulateNewData = async () => {
-    if (!user?.uid) return;
-    const sim = {
-      speed: Math.floor(Math.random() * 120) + 20,
-      rpm: Math.floor(Math.random() * 4000) + 1000,
-      fuelConsumption: parseFloat((Math.random() * 5 + 6).toFixed(1)),
-      throttlePosition: Math.floor(Math.random() * 60) + 10,
-      battery: parseFloat((Math.random() * 1.5 + 11.5).toFixed(1)),
-      coolant: Math.floor(Math.random() * 30) + 80,
-      oilPressure: Math.floor(Math.random() * 20) + 20,
-      engineLoad: Math.floor(Math.random() * 50) + 30,
-      lastUpdated: serverTimestamp(),
-    };
-    try {
-      const docRef = doc(db, 'users', user.uid, 'telemetry', 'latest');
-      await setDoc(docRef, sim);
-      setHasPermissionError(false);
-      await ensureAndFetchTelemetry();
-    } catch (err: any) {
-      if (err?.code === 'firestore/permission-denied') {
-        setHasPermissionError(true);
-        return;
-      }
-      console.error('[FuelFlow] Sim error:', err);
-    }
-  };
+  const MAX_AVG_SAMPLES = 180;
+  const sessionSamples = useRef<{ s: number; r: number; f: number }[]>([]);
+  const [sessionAvg, setSessionAvg] = useState({
+    speed: 0,
+    rpm: 0,
+    fuel: 0,
+    n: 0,
+  });
 
-  // --- Unit conversions (use activeData which prefers BLE) ---
-  const displaySpeed = metricUnits
-    ? activeData.speed
-    : Math.round(activeData.speed * 0.621371);
+  useEffect(() => {
+    if (!ble.isConnected) {
+      sessionSamples.current = [];
+      setSessionAvg({ speed: 0, rpm: 0, fuel: 0, n: 0 });
+      return;
+    }
+    const d = ble.telemetry;
+    sessionSamples.current.push({
+      s: d.speed,
+      r: d.rpm,
+      f: d.fuelConsumption,
+    });
+    if (sessionSamples.current.length > MAX_AVG_SAMPLES) {
+      sessionSamples.current.shift();
+    }
+    const arr = sessionSamples.current;
+    const n = arr.length;
+    if (n === 0) return;
+    setSessionAvg({
+      speed: arr.reduce((a, b) => a + b.s, 0) / n,
+      rpm: arr.reduce((a, b) => a + b.r, 0) / n,
+      fuel: arr.reduce((a, b) => a + b.f, 0) / n,
+      n,
+    });
+  }, [ble.isConnected, ble.telemetry]);
+
   const speedUnit = metricUnits ? 'km/h' : 'mph';
   const maxSpeed = metricUnits ? 240 : 150;
   const fuelUnit = metricUnits ? 'L/100km' : 'mpg';
-  const displayFuel = metricUnits
-    ? activeData.fuelConsumption
-    : activeData.fuelConsumption > 0
-    ? Math.round(235.215 / activeData.fuelConsumption)
-    : 0;
   const maxFuel = metricUnits ? 25 : 60;
 
-  const noData = !ble.isConnected && !isConnected;
+  const gaugeSpeed = hasEsp
+    ? metricUnits
+      ? tel.speed
+      : Math.round(tel.speed * 0.621371)
+    : null;
+  const displayFuel = hasEsp
+    ? metricUnits
+      ? tel.fuelConsumption
+      : tel.fuelConsumption > 0
+        ? Math.round(235.215 / tel.fuelConsumption)
+        : 0
+    : null;
+
+  const noData = !hasEsp;
   const scrollContentStyle = styles.scrollContent;
-  const liveDotOpacityStyle = { opacity: activeConnected ? pulseAnim : 0.2 };
-  const simulateBtnStyle = styles.simulateButton;
   const fuelValueColorStyle = {
     color: noData ? colors.textSecondary : colors.text,
   };
   const fuelFillStyle = {
     backgroundColor: TEAL,
-    width: (noData
+    width: (noData || displayFuel === null
       ? '0%'
       : `${Math.min((Number(displayFuel) / maxFuel) * 100, 100)}%`) as `${number}%`,
   };
@@ -226,7 +186,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
     backgroundColor: ORANGE,
     width: (noData
       ? '0%'
-      : `${Math.min((activeData.throttlePosition / MAX_THROTTLE) * 100, 100)}%`) as `${number}%`,
+      : `${Math.min((tel.throttlePosition / MAX_THROTTLE) * 100, 100)}%`) as `${number}%`,
   };
   const statusCardStyle = styles.statusCard;
 
@@ -239,7 +199,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
   const engineStatus = (v: number) =>
     v === 0 ? 'good' : v <= 75 ? 'good' : v <= 90 ? 'warning' : 'critical';
 
-  if (isInitialLoad && !ble.isConnected) {
+  if (isInitialLoad) {
     return (
       <View
         style={[
@@ -276,47 +236,24 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
           </View>
         )}
 
-        {/* ── Section Header: Live ── */}
+        {/* ── Telemetry header ── */}
         <View style={styles.sectionHeader}>
-          <View style={styles.sectionTitleRow}>
-            <Animated.View style={[styles.liveDot, liveDotOpacityStyle]} />
-            <Text
-              style={[styles.sectionTitle, { color: colors.textSecondary }]}
-            >
-              {activeConnected ? (ble.isConnected ? 'BLE LIVE' : t('live')) : t('no_signal')}
-            </Text>
-            {lastSynced && (
-              <Text style={[styles.syncTime, { color: colors.textSecondary }]}>
-                · {lastSynced}
-              </Text>
-            )}
-          </View>
-
-          <View className="flex-row" style={styles.actionBtns}>
-            {/* Simulate button */}
-            <TouchableOpacity
-              style={[styles.iconBtn, simulateBtnStyle]}
-              onPress={simulateNewData}
-              disabled={isFetching || hasPermissionError}
-            >
-              <Icon name="upload-cloud" size={16} color={ORANGE} />
-            </TouchableOpacity>
-
-            {/* Refresh button */}
-            <TouchableOpacity
-              style={[styles.iconBtn, { borderColor: colors.border }]}
-              onPress={ensureAndFetchTelemetry}
-              disabled={isFetching}
-            >
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
-                <Icon
-                  name="refresh-cw"
-                  size={16}
-                  color={isFetching ? colors.primary : colors.textSecondary}
-                />
-              </Animated.View>
-            </TouchableOpacity>
-          </View>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+            {t('dashboard_title')}
+          </Text>
+          <TouchableOpacity
+            style={[styles.iconBtn, { borderColor: colors.border }]}
+            onPress={ensureAndFetchTelemetry}
+            disabled={isFetching}
+          >
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <Icon
+                name="refresh-cw"
+                size={16}
+                color={isFetching ? colors.primary : colors.textSecondary}
+              />
+            </Animated.View>
+          </TouchableOpacity>
         </View>
 
         {/* ── Gauges Card ── */}
@@ -332,7 +269,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
           <View style={styles.gaugesRow}>
             <View style={styles.gaugeWrapper}>
               <RadialGauge
-                value={displaySpeed}
+                value={gaugeSpeed}
                 maxValue={maxSpeed}
                 label={t('speed')}
                 unit={speedUnit}
@@ -345,7 +282,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
             />
             <View style={styles.gaugeWrapper}>
               <RadialGauge
-                value={activeData.rpm}
+                value={hasEsp ? tel.rpm : null}
                 maxValue={MAX_RPM}
                 label={t('rpm')}
                 unit="x1000"
@@ -355,6 +292,65 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
             </View>
           </View>
         </View>
+
+        {ble.isConnected && sessionAvg.n > 0 && (
+          <View
+            style={[
+              styles.avgCard,
+              {
+                backgroundColor: colors.cardBackground,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.avgSectionTitle, { color: colors.textSecondary }]}>
+              {t('session_averages')} · n={sessionAvg.n}
+            </Text>
+            <View style={styles.avgRow}>
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('avg_speed')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {metricUnits
+                    ? sessionAvg.speed.toFixed(1)
+                    : Math.round(sessionAvg.speed * 0.621371)}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
+                  {speedUnit}
+                </Text>
+              </View>
+              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('avg_rpm')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {Math.round(sessionAvg.rpm)}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
+                  RPM
+                </Text>
+              </View>
+              <View style={[styles.avgDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.avgCol}>
+                <Text style={[styles.avgLabel, { color: colors.textSecondary }]}>
+                  {t('avg_fuel')}
+                </Text>
+                <Text style={[styles.avgValue, { color: colors.text }]}>
+                  {metricUnits
+                    ? sessionAvg.fuel.toFixed(1)
+                    : sessionAvg.fuel > 0
+                      ? Math.round(235.215 / sessionAvg.fuel)
+                      : '—'}
+                </Text>
+                <Text style={[styles.avgUnit, { color: colors.textSecondary }]}>
+                  {fuelUnit}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* ── Fuel + Throttle ── */}
         <View style={styles.metricsRow}>
@@ -371,7 +367,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
               {t('fuel_consumption')}
             </Text>
             <Text style={[styles.metricBigValue, fuelValueColorStyle]}>
-              {noData ? '—' : displayFuel}
+              {noData || displayFuel === null ? '—' : displayFuel}
             </Text>
             <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
               {fuelUnit}
@@ -394,7 +390,7 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
               {t('throttle_position')}
             </Text>
             <Text style={[styles.metricBigValue, throttleValueColorStyle]}>
-              {noData ? '—' : activeData.throttlePosition}
+              {noData ? '—' : tel.throttlePosition}
             </Text>
             <Text style={[styles.metricUnit, { color: colors.textSecondary }]}>
               %
@@ -433,8 +429,8 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
                   />
                 ),
                 label: t('battery'),
-                value: noData ? '— V' : `${Number(activeData.battery).toFixed(1)}V`,
-                status: batteryStatus(activeData.battery),
+                value: noData ? '— V' : `${Number(tel.battery).toFixed(1)}V`,
+                status: batteryStatus(tel.battery),
                 color: colors.success,
               },
               {
@@ -446,8 +442,8 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
                   />
                 ),
                 label: t('coolant'),
-                value: noData ? '— °C' : `${activeData.coolant}°C`,
-                status: coolantStatus(activeData.coolant),
+                value: noData ? '— °C' : `${tel.coolant}°C`,
+                status: coolantStatus(tel.coolant),
                 color: colors.success,
               },
               {
@@ -459,8 +455,8 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
                   />
                 ),
                 label: t('oil_pressure'),
-                value: noData ? '— PSI' : `${activeData.oilPressure} PSI`,
-                status: oilStatus(activeData.oilPressure),
+                value: noData ? '— PSI' : `${tel.oilPressure} PSI`,
+                status: oilStatus(tel.oilPressure),
                 color: colors.success,
               },
               {
@@ -472,8 +468,8 @@ const DashboardScreen: React.FC<DashboardTabScreenProps> = ({
                   />
                 ),
                 label: t('engine_load'),
-                value: noData ? '— %' : `${activeData.engineLoad}%`,
-                status: engineStatus(activeData.engineLoad),
+                value: noData ? '— %' : `${tel.engineLoad}%`,
+                status: engineStatus(tel.engineLoad),
                 color: colors.success,
               },
             ]}
@@ -521,12 +517,8 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 10,
   },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22C55E' },
   sectionTitle: { fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
-  syncTime: { fontSize: 11, opacity: 0.5 },
 
-  actionBtns: { flexDirection: 'row', gap: 8 },
   iconBtn: {
     width: 34,
     height: 34,
@@ -535,10 +527,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  simulateButton: {
-    borderColor: 'rgba(249,115,22,0.3)',
-    backgroundColor: 'rgba(249,115,22,0.08)',
+  avgCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
   },
+  avgSectionTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: 12,
+  },
+  avgRow: { flexDirection: 'row', alignItems: 'stretch' },
+  avgCol: { flex: 1, alignItems: 'center' },
+  avgDivider: { width: 1, opacity: 0.35 },
+  avgLabel: { fontSize: 9, fontWeight: '600', marginBottom: 4 },
+  avgValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    fontFamily: 'Courier New',
+  },
+  avgUnit: { fontSize: 9, marginTop: 2, opacity: 0.6 },
 
   card: {
     marginHorizontal: 16,

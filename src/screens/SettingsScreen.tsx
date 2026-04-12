@@ -15,8 +15,6 @@ import { useLocalization, Language } from '../context/LocalizationContext';
 import { useMetricUnits } from '../context/MetricUnitsContext';
 import { AppHeader } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
-import { useTelemetry } from '../context/TelemetryContext';
-import { ActivityIndicator } from 'react-native';
 
 const ORANGE = '#F97316';
 
@@ -115,7 +113,6 @@ const SettingsScreen: React.FC<SettingsTabScreenProps> = ({
   const { t, language, setLanguage } = useLocalization();
   const { metricUnits, setMetricUnits } = useMetricUnits();
   const { user, logout } = useAuth();
-  const ble = useTelemetry();
 
   const [faultAlerts, setFaultAlerts] = useState(true);
   const [maintenanceReminders, setMaintenanceReminders] = useState(true);
@@ -169,54 +166,6 @@ const SettingsScreen: React.FC<SettingsTabScreenProps> = ({
             onPress={logout}
             colors={colors}
             danger
-          />
-        </View>
-
-        {/* ── BLE Connection ── */}
-        <Text style={[S.section, { color: colors.textSecondary }]}>
-          ESP32 BLE
-        </Text>
-        <View
-          style={[
-            S.card,
-            {
-              backgroundColor: colors.cardBackground,
-              borderColor: ble.isConnected ? '#22C55E40' : colors.border,
-            },
-          ]}
-        >
-          <Row
-            icon={ble.isConnected ? 'bluetooth-connect' : 'bluetooth'}
-            label="FuelFlow-ESP32"
-            subtitle={
-              ble.isConnected
-                ? '● Connected'
-                : ble.bleStatus === 'scanning'
-                ? 'Scanning...'
-                : ble.bleStatus === 'connecting'
-                ? 'Connecting...'
-                : ble.bleError ?? 'Not connected'
-            }
-            colors={colors}
-            right={
-              ble.bleStatus === 'scanning' || ble.bleStatus === 'connecting' ? (
-                <ActivityIndicator size="small" color={ORANGE} />
-              ) : ble.isConnected ? (
-                <TouchableOpacity
-                  onPress={ble.disconnect}
-                  style={S.bleBtn}
-                >
-                  <MCI name="close" size={18} color="#EF4444" />
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  onPress={ble.connect}
-                  style={[S.bleBtn, { backgroundColor: `${ORANGE}15` }]}
-                >
-                  <MCI name="magnify" size={18} color={ORANGE} />
-                </TouchableOpacity>
-              )
-            }
           />
         </View>
 
